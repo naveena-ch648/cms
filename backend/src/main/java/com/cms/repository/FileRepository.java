@@ -1,0 +1,38 @@
+package com.cms.repository;
+
+import com.cms.entity.FileEntity;
+import com.cms.entity.FileEntity.FileStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface FileRepository extends JpaRepository<FileEntity, Long> {
+
+    Optional<FileEntity> findByUuid(String uuid);
+
+    Page<FileEntity> findByFolderIdAndStatus(Long folderId, FileStatus status, Pageable pageable);
+
+    List<FileEntity> findByOrganizationId(Long organizationId);
+
+    List<FileEntity> findByStatusAndPermanentDeleteAtBefore(FileStatus status, Instant cutoff);
+
+    boolean existsByFolderIdAndNameAndStatus(Long folderId, String name, FileStatus status);
+
+    Optional<FileEntity> findByFolderIdAndNameAndStatus(Long folderId, String name, FileStatus status);
+
+    @Query("SELECT COALESCE(SUM(f.sizeBytes), 0) FROM FileEntity f WHERE f.organization.id = :orgId AND f.status <> 'DELETED'")
+    Long sumSizeBytesByOrganizationId(@Param("orgId") Long orgId);
+
+    Page<FileEntity> findByWorkspaceIdAndStatus(Long workspaceId, FileStatus status, Pageable pageable);
+
+    @Query("SELECT f.uuid FROM FileEntity f WHERE f.workspace.uuid = :workspaceUuid AND f.status = 'ACTIVE'")
+    List<String> findUuidsByWorkspaceUuid(@Param("workspaceUuid") String workspaceUuid);
+}

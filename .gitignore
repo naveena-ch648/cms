@@ -1,0 +1,47 @@
+# Java / Spring Boot
+backend/target/
+*.class
+*.jar
+*.war
+*.ear
+*.log
+.gradle/
+build/
+
+# Maven wrapper
+backend/.mvn/wrapper/maven-wrapper.jar
+
+# Node.js / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+*.log
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.iml
+*.iws
+*.ipr
+*.suo
+*.user
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Docker
+docker/mysql-data/
+docker/redis-data/
+
+# Redis
+dump.rdb
