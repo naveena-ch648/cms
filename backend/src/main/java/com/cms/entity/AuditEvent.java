@@ -30,17 +30,38 @@ public class AuditEvent {
     @Column(name = "event_type", nullable = false, length = 50)
     private String eventType;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "category", nullable = false, length = 30)
+    private AuditCategory category;
+
     @Column(name = "resource_type", length = 50)
     private String resourceType;
 
     @Column(name = "resource_id")
     private Long resourceId;
 
+    @Column(name = "resource_name", length = 255)
+    private String resourceName;
+
+    @Column(name = "outcome", nullable = false, length = 10)
+    @Builder.Default
+    private String outcome = "SUCCESS";
+
     @Column(columnDefinition = "JSON")
     private String details;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "workspace_id")
+    private Workspace workspace;
+
     @Column(name = "ip_address", length = 45)
     private String ipAddress;
+
+    @Column(name = "user_agent", length = 500)
+    private String userAgent;
+
+    @Column(name = "actor_name", length = 100)
+    private String actorName;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

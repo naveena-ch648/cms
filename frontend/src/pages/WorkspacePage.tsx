@@ -11,6 +11,9 @@ import UploadProgressPanel from '../components/UploadProgressPanel';
 import FileDetailPanel from '../components/FileDetailPanel';
 import PreviewModal from '../components/preview/PreviewModal';
 import CollaborationSidebar from '../components/collaboration/CollaborationSidebar';
+import MetadataFieldManager from '../components/metadata/MetadataFieldManager';
+import MetadataFilter from '../components/metadata/MetadataFilter';
+import BulkMetadataDialog from '../components/metadata/BulkMetadataDialog';
 import { useAuth } from '../contexts/AuthContext';
 import type { FolderTreeNode, Folder, FolderFavorite, FolderRecent, BreadcrumbItem } from '../types/folder';
 import type { FileInfo, UploadProgress } from '../types/file';
@@ -36,6 +39,10 @@ export default function WorkspacePage() {
   const [previewFile, setPreviewFile] = useState<FileInfo | null>(null);
   const [collaborationFileId, setCollaborationFileId] = useState<string | null>(null);
   const [collaborationFolderId, setCollaborationFolderId] = useState<string | null>(null);
+  const [showMetadataSettings, setShowMetadataSettings] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [_activeFilters, setActiveFilters] = useState<{ tags: string[]; metadataFilters: Record<string, string> }>({ tags: [], metadataFilters: {} });
+  const [bulkEditFileIds, setBulkEditFileIds] = useState<string[] | null>(null);
 
   const favoriteFolderIds = new Set(favorites.map(f => f.id));
 
@@ -265,6 +272,20 @@ export default function WorkspacePage() {
             </h2>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
+                onClick={() => setShowMetadataSettings(!showMetadataSettings)}
+                style={{ padding: '6px 16px', cursor: 'pointer' }}
+                title="Metadata settings"
+              >
+                ⚙️ Metadata
+              </button>
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                style={{ padding: '6px 16px', cursor: 'pointer' }}
+                title="Filter by metadata and tags"
+              >
+                🏷️ Filter
+              </button>
+              <button
                 onClick={() => navigate(`/workspaces/${workspaceId}/search`)}
                 style={{ padding: '6px 16px', cursor: 'pointer' }}
                 title="Search files"
@@ -284,6 +305,16 @@ export default function WorkspacePage() {
             <FileUploadZone onFilesSelected={handleFilesSelected} />
           )}
 
+          {showFilters && workspaceId && (
+            <MetadataFilter workspaceId={workspaceId} onFilterChange={setActiveFilters} />
+          )}
+
+          {showMetadataSettings && workspaceId && (
+            <div style={{ marginBottom: 16, border: '1px solid #e0e0e0', borderRadius: 8 }}>
+              <MetadataFieldManager workspaceId={workspaceId} />
+            </div>
+          )}
+
           {selectedFolderId && files.length > 0 && (
             <div style={{ marginTop: 16 }}>
               <FileList
@@ -296,6 +327,7 @@ export default function WorkspacePage() {
                   }
                   setCollaborationFileId(file.id);
                 }}
+                onBulkEdit={(fileIds) => setBulkEditFileIds(fileIds)}
                 loading={filesLoading}
               />
             </div>
@@ -363,6 +395,14 @@ export default function WorkspacePage() {
           fileName={previewFile.name}
           mimeType={previewFile.mimeType}
           onClose={() => setPreviewFile(null)}
+        />
+      )}
+      {bulkEditFileIds && workspaceId && (
+        <BulkMetadataDialog
+          fileIds={bulkEditFileIds}
+          workspaceId={workspaceId}
+          onClose={() => setBulkEditFileIds(null)}
+          onSuccess={() => { if (selectedFolderId) loadFiles(selectedFolderId); }}
         />
       )}
     </div>

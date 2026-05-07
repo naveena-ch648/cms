@@ -156,4 +156,20 @@ public class WorkspaceService {
         Workspace workspace = getById(workspaceUuid);
         return userWorkspaceRoleRepository.findByWorkspaceId(workspace.getId());
     }
+
+    public Workspace getByUuid(String uuid) {
+        return workspaceRepository.findByUuid(uuid)
+                .orElseThrow(() -> new ResourceNotFoundException("Workspace not found"));
+    }
+
+    public boolean isWorkspaceAdmin(Long workspaceId, Long userId) {
+        return userWorkspaceRoleRepository.findByUserIdAndWorkspaceId(userId, workspaceId)
+                .map(uwr -> uwr.getRole().getName().equalsIgnoreCase("Admin"))
+                .orElse(false);
+    }
+
+    public boolean isWorkspaceMember(Long workspaceId, Long userId) {
+        return userWorkspaceRoleRepository.findByUserIdAndWorkspaceId(userId, workspaceId)
+                .isPresent();
+    }
 }

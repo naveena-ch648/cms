@@ -1,7 +1,10 @@
 package com.cms.controller;
 
+import com.cms.annotation.Audited;
 import com.cms.dto.ApiResponse;
 import com.cms.dto.sharing.*;
+import com.cms.entity.AuditCategory;
+import com.cms.entity.AuditEventType;
 import com.cms.entity.SharedLink;
 import com.cms.entity.SharedLinkAccess;
 import com.cms.security.UserPrincipal;
@@ -32,6 +35,7 @@ public class SharedLinkController {
     // --- Authenticated endpoints ---
 
     @PostMapping("/api/v1/workspaces/{workspaceId}/share-links")
+    @Audited(event = AuditEventType.LINK_CREATED, category = AuditCategory.SHARING, resourceType = "share_link")
     public ResponseEntity<ApiResponse<ShareLinkResponse>> createLink(
             @PathVariable String workspaceId,
             @Valid @RequestBody CreateShareLinkRequest request,
@@ -62,6 +66,7 @@ public class SharedLinkController {
     }
 
     @DeleteMapping("/api/v1/share-links/{uuid}")
+    @Audited(event = AuditEventType.LINK_REVOKED, category = AuditCategory.SHARING, resourceType = "share_link")
     public ResponseEntity<ApiResponse<Void>> revokeLink(
             @PathVariable String uuid,
             @AuthenticationPrincipal UserPrincipal principal) {

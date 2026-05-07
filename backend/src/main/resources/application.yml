@@ -45,9 +45,10 @@ server:
   port: 8080
 
 minio:
-  endpoint: http://localhost:9000
-  access-key: minioadmin
-  secret-key: minioadmin
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  public-endpoint: ${MINIO_PUBLIC_ENDPOINT:}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
   region: us-east-1
 
 opensearch:
@@ -55,6 +56,22 @@ opensearch:
   port: ${OPENSEARCH_PORT:9200}
   scheme: http
   index-name: cms_files
+
+qdrant:
+  host: ${QDRANT_HOST:localhost}
+  port: ${QDRANT_PORT:6333}
+  collection-name: document_chunks
+
+llm:
+  provider: ${LLM_PROVIDER:openai}
+  openai:
+    api-key: ${OPENAI_API_KEY:}
+    model: ${OPENAI_MODEL:gpt-4o-mini}
+    temperature: 0.1
+    max-tokens: 1024
+  embedding:
+    model: ${EMBEDDING_MODEL:all-MiniLM-L6-v2}
+    dimension: ${EMBEDDING_DIMENSION:384}
 
 file-upload:
   max-single-upload-size: 104857600

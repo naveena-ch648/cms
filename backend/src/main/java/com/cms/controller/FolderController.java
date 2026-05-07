@@ -1,7 +1,10 @@
 package com.cms.controller;
 
+import com.cms.annotation.Audited;
 import com.cms.dto.ApiResponse;
 import com.cms.dto.folder.*;
+import com.cms.entity.AuditCategory;
+import com.cms.entity.AuditEventType;
 import com.cms.entity.Folder;
 import com.cms.entity.FolderPermission;
 import com.cms.security.UserPrincipal;
@@ -27,6 +30,7 @@ public class FolderController {
 
     @PostMapping
     @PreAuthorize("hasPermission(null, 'manage-folders')")
+    @Audited(event = AuditEventType.FOLDER_CREATED, category = AuditCategory.FILE_OPERATION, resourceType = "folder")
     public ResponseEntity<ApiResponse<FolderResponse>> create(
             @PathVariable String workspaceId,
             @Valid @RequestBody CreateFolderRequest request,
@@ -74,6 +78,7 @@ public class FolderController {
 
     @DeleteMapping("/{folderId}")
     @PreAuthorize("hasPermission(null, 'manage-folders')")
+    @Audited(event = AuditEventType.FOLDER_DELETED, category = AuditCategory.FILE_OPERATION, resourceType = "folder")
     public ResponseEntity<ApiResponse<Void>> delete(
             @PathVariable String workspaceId,
             @PathVariable String folderId) {
@@ -83,6 +88,7 @@ public class FolderController {
 
     @PutMapping("/{folderId}/move")
     @PreAuthorize("hasPermission(null, 'manage-folders')")
+    @Audited(event = AuditEventType.FOLDER_MOVED, category = AuditCategory.FILE_OPERATION, resourceType = "folder")
     public ResponseEntity<ApiResponse<FolderResponse>> move(
             @PathVariable String workspaceId,
             @PathVariable String folderId,

@@ -1,5 +1,6 @@
 package com.cms.service;
 
+import com.cms.entity.MetadataValue;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,6 +12,8 @@ import org.opensearch.client.opensearch.indices.IndexSettingsAnalysis;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -76,11 +79,56 @@ public class SearchIndexService {
                                 Map.entry("fileSize", Property.of(p -> p.long_(LongNumberProperty.of(l -> l)))),
                                 Map.entry("createdAt", Property.of(p -> p.date(DateProperty.of(d -> d.format("strict_date_optional_time||epoch_millis"))))),
                                 Map.entry("updatedAt", Property.of(p -> p.date(DateProperty.of(d -> d.format("strict_date_optional_time||epoch_millis"))))),
-                                Map.entry("indexedAt", Property.of(p -> p.date(DateProperty.of(d -> d.format("strict_date_optional_time||epoch_millis")))))
+                                Map.entry("indexedAt", Property.of(p -> p.date(DateProperty.of(d -> d.format("strict_date_optional_time||epoch_millis"))))),
+                                Map.entry("metadata", Property.of(p -> p.object(ObjectProperty.of(o -> o.dynamic(DynamicMapping.True))))),
+                                Map.entry("tags", Property.of(p -> p.keyword(KeywordProperty.of(k -> k))))
                         ))
                 ))
                 .build();
 
         openSearchClient.indices().create(request);
+    }
+
+    public void updateFileMetadata(String fileUuid, List<MetadataValue> values) {
+        try {
+            Map<String, Object> metadataMap = new HashMap<>();
+            for (MetadataValue value : values) {
+                String fieldName = value.getField().getName().toLowerCase().replaceAll("[^a-z0-9_]", "_");
+                Object val = switch (value.getField().getFieldType()) {
+                    case TEXT, DROPDOWN -> value.getTextValue();
+                    case NUMBER -> value.getNumberValue();
+                    case DATE -> value.getDateValue() != null ? value.getDateValue().toString() : null;
+                };
+                metadataMap.put(fieldName, val);
+            }
+
+            Map<String, Object> doc = new HashMap<>();
+            doc.put("metadata", metadataMap);
+
+            openSearchClient.update(u -> u
+                    .index(indexName)
+                    .id(fileUuid)
+                    .doc(doc),
+                    Map.class
+            );
+        } catch (Exception e) {
+            log.warn("Failed to update metadata in search index for file {}: {}", fileUuid, e.getMessage());
+        }
+    }
+
+    public void updateFileTags(String fileUuid, List<String> tagNames) {
+        try {
+            Map<String, Object> doc = new HashMap<>();
+            doc.put("tags", tagNames);
+
+            openSearchClient.update(u -> u
+                    .index(indexName)
+                    .id(fileUuid)
+                    .doc(doc),
+                    Map.class
+            );
+        } catch (Exception e) {
+            log.warn("Failed to update tags in search index for file {}: {}", fileUuid, e.getMessage());
+        }
     }
 }

@@ -1,7 +1,10 @@
 package com.cms.controller;
 
+import com.cms.annotation.Audited;
 import com.cms.dto.ApiResponse;
 import com.cms.dto.user.*;
+import com.cms.entity.AuditCategory;
+import com.cms.entity.AuditEventType;
 import com.cms.entity.User;
 import com.cms.entity.UserOrganizationRole;
 import com.cms.middleware.TenantContext;
@@ -83,6 +86,7 @@ public class UserController {
     }
 
     @PutMapping("/{userId}/role")
+    @Audited(event = AuditEventType.ROLE_ASSIGNED, category = AuditCategory.PERMISSION_CHANGE, resourceType = "user")
     public ResponseEntity<ApiResponse<UserResponse>> changeRole(
             @PathVariable String userId, @Valid @RequestBody ChangeRoleRequest request) {
         userService.changeRole(userId, request.getRoleId());

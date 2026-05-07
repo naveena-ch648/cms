@@ -7,6 +7,7 @@ import time
 import traceback
 
 import redis
+from botocore.exceptions import ClientError
 
 from config import Config
 from processors.thumbnail import process_thumbnail
@@ -16,6 +17,8 @@ from processors.preview_image import process_image_thumbnail
 from processors.preview_video import process_video_thumbnail
 from processors.preview_office import process_office_preview
 from processors.search_indexer import process_search_index
+from processors.embeddings import process_embedding
+from processors.embedding_config import EmbeddingConfig
 
 
 running = True
@@ -41,6 +44,17 @@ def process_job(r: redis.Redis, job_data: dict):
 
     print(f"Processing file {file_id} (org={org_id}, action={action}, mime={mime_type})")
 
+    try:
+        _dispatch_action(action, mime_type, file_id, org_id, storage_bucket, storage_key, r)
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code in ("NoSuchKey", "NoSuchBucket", "404"):
+            print(f"File not found in storage (bucket={storage_bucket}, key={storage_key}): {error_code} — skipping")
+            return
+        raise
+
+
+def _dispatch_action(action, mime_type, file_id, org_id, storage_bucket, storage_key, r):
     if action == "preview":
         # Full preview generation based on mime type
         if mime_type == "application/pdf":
@@ -102,13 +116,13 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     print(f"Worker starting — Redis at {Config.REDIS_HOST}:{Config.REDIS_PORT}")
-    print(f"Listening on queues: {Config.QUEUE_NAME}, {Config.SEARCH_INDEX_QUEUE}")
+    print(f"Listening on queues: {Config.QUEUE_NAME}, {Config.SEARCH_INDEX_QUEUE}, {EmbeddingConfig.EMBEDDING_QUEUE}")
 
     r = get_redis_client()
 
     while running:
         try:
-            result = r.brpop([Config.QUEUE_NAME, Config.SEARCH_INDEX_QUEUE], timeout=5)
+            result = r.brpop([Config.QUEUE_NAME, Config.SEARCH_INDEX_QUEUE, EmbeddingConfig.EMBEDDING_QUEUE], timeout=5)
             if result is None:
                 continue
 
@@ -130,6 +144,21 @@ def main():
                     else:
                         r.lpush(Config.SEARCH_INDEX_DLQ, json.dumps(job_data))
                         print(f"Search index job moved to DLQ after {Config.SEARCH_INDEX_MAX_RETRIES} failures")
+            elif queue_name == EmbeddingConfig.EMBEDDING_QUEUE:
+                # Embedding job
+                retry_count = job_data.get("_retries", 0)
+                try:
+                    process_embedding(job_data)
+                except Exception as e:
+                    print(f"Embedding job failed: {e}")
+                    traceback.print_exc()
+                    if retry_count < EmbeddingConfig.MAX_RETRIES:
+                        job_data["_retries"] = retry_count + 1
+                        r.lpush(EmbeddingConfig.EMBEDDING_QUEUE, json.dumps(job_data))
+                        print(f"Retrying embedding job (attempt {retry_count + 1}/{EmbeddingConfig.MAX_RETRIES})")
+                    else:
+                        r.lpush(EmbeddingConfig.EMBEDDING_DLQ, json.dumps(job_data))
+                        print(f"Embedding job moved to DLQ after {EmbeddingConfig.MAX_RETRIES} failures")
             else:
                 # File processing job
                 retry_count = job_data.get("_retries", 0)

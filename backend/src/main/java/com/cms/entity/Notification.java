@@ -16,7 +16,8 @@ import java.time.Instant;
 public class Notification {
 
     public enum Type {
-        MENTION, TASK_ASSIGNED, TASK_COMPLETED
+        MENTION, TASK_ASSIGNED, TASK_COMPLETED, APPROVAL_REQUESTED, APPROVAL_APPROVED, APPROVAL_REJECTED,
+        FILE_SHARED, WORKFLOW_TRANSITIONED
     }
 
     @Id

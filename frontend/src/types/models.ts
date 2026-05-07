@@ -116,3 +116,88 @@ export interface AuthUser {
   organizationRole: string;
   lastLoginAt?: string;
 }
+
+// Audit types
+export type AuditCategory = 'AUTHENTICATION' | 'FILE_OPERATION' | 'PERMISSION_CHANGE' | 'SHARING' | 'WORKFLOW' | 'SYSTEM';
+
+export interface AuditEvent {
+  id: number;
+  userId?: number;
+  actorName: string;
+  eventType: string;
+  category: AuditCategory;
+  resourceType?: string;
+  resourceId?: number;
+  resourceName?: string;
+  outcome: string;
+  details?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  workspaceId?: number;
+  createdAt: string;
+}
+
+export interface AuditSearchParams {
+  query?: string;
+  category?: AuditCategory;
+  eventType?: string;
+  userId?: number;
+  outcome?: string;
+  workspaceId?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  size?: number;
+}
+
+export interface AuditSearchResult {
+  events: AuditEvent[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+export interface ComplianceReport {
+  id: string;
+  reportType: string;
+  status: 'PENDING' | 'GENERATING' | 'COMPLETED' | 'FAILED';
+  dateFrom: string;
+  dateTo: string;
+  totalEvents?: number;
+  filePath?: string;
+  fileSize?: number;
+  errorMessage?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface AuditAlertRule {
+  id: string;
+  name: string;
+  description?: string;
+  eventType: string;
+  thresholdCount: number;
+  timeWindowMinutes: number;
+  enabled: boolean;
+  createdAt: string;
+}
+
+export interface AuditAlertInstance {
+  id: string;
+  ruleName: string;
+  ruleId: string;
+  triggeredByUser?: string;
+  eventCount: number;
+  windowStart: string;
+  windowEnd: string;
+  acknowledged: boolean;
+  acknowledgedBy?: string;
+  acknowledgedAt?: string;
+  createdAt: string;
+}
+
+export interface AuditStats {
+  totalEvents: number;
+  byCategory: Record<AuditCategory, number>;
+  byOutcome: Record<string, number>;
+}

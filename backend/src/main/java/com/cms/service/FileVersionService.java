@@ -28,6 +28,7 @@ public class FileVersionService {
     private final StorageService storageService;
     private final StorageQuotaService storageQuotaService;
     private final AuditService auditService;
+    private final EmbeddingJobService embeddingJobService;
 
     @Transactional
     public FileVersion uploadNewVersion(String fileUuid, MultipartFile file, String changeNote, User uploader) {
@@ -78,6 +79,13 @@ public class FileVersionService {
         // Audit log
         auditService.log(fileEntity.getOrganization(), uploader, "UPLOAD_VERSION",
                 "FILE", fileEntity.getId(), "version=" + nextVersion, null);
+
+        // Re-trigger embedding for updated content
+        try {
+            embeddingJobService.retriggerEmbedding(fileEntity);
+        } catch (Exception e) {
+            log.warn("Failed to re-trigger embedding for file {}: {}", fileUuid, e.getMessage());
+        }
 
         log.info("Created version {} for file {}", nextVersion, fileUuid);
         return version;

@@ -6,6 +6,7 @@ import com.cms.entity.FileVersion;
 import com.cms.entity.Folder;
 import com.cms.entity.StorageQuota;
 import com.cms.entity.User;
+import com.cms.entity.ActivityEvent;
 import com.cms.event.FileIndexEventPublisher;
 import com.cms.repository.FileRepository;
 import com.cms.repository.FileVersionRepository;
@@ -19,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -34,6 +36,8 @@ public class FileService {
     private final AuditService auditService;
     private final PreviewService previewService;
     private final FileIndexEventPublisher fileIndexEventPublisher;
+    private final EmbeddingJobService embeddingJobService;
+    private final ActivityEventService activityEventService;
 
     public FileEntity getByUuid(String uuid) {
         return fileRepository.findByUuid(uuid)
@@ -109,6 +113,18 @@ public class FileService {
             log.warn("Failed to publish search index event for file {}: {}", file.getUuid(), e.getMessage());
         }
 
+        // Dispatch embedding job for AI Q&A
+        try {
+            embeddingJobService.dispatchEmbeddingJob(file);
+        } catch (Exception e) {
+            log.warn("Failed to dispatch embedding job for file {}: {}", file.getUuid(), e.getMessage());
+        }
+
+        // Record activity event
+        activityEventService.recordEvent(uploader, ActivityEvent.ActionType.FILE_UPLOADED,
+                "FILE", file.getUuid(), file.getName(),
+                folder.getWorkspace(), folder.getWorkspace().getOrganization(), null);
+
         return file;
     }
 
@@ -142,7 +158,14 @@ public class FileService {
         file.setFolder(targetFolder);
         file.setName(resolvedName);
 
-        return fileRepository.save(file);
+        file = fileRepository.save(file);
+
+        // Record activity event
+        activityEventService.recordEvent(user, ActivityEvent.ActionType.FILE_MOVED,
+                "FILE", file.getUuid(), file.getName(),
+                file.getWorkspace(), file.getOrganization(), null);
+
+        return file;
     }
 
     @Transactional
@@ -191,7 +214,14 @@ public class FileService {
         file.setTrashedBy(user);
         file.setPermanentDeleteAt(Instant.now().plus(quota.getTrashRetentionDays(), ChronoUnit.DAYS));
 
-        return fileRepository.save(file);
+        file = fileRepository.save(file);
+
+        // Record activity event
+        activityEventService.recordEvent(user, ActivityEvent.ActionType.FILE_DELETED,
+                "FILE", file.getUuid(), file.getName(),
+                file.getWorkspace(), file.getOrganization(), null);
+
+        return file;
     }
 
     @Transactional
@@ -296,5 +326,16 @@ public class FileService {
 
     private com.cms.entity.StorageQuota getQuota(Long orgId) {
         return storageQuotaService.getQuotaForOrg(orgId);
+    }
+
+    /**
+     * Get all file UUIDs accessible to a user in a workspace.
+     * For MVP, returns all active files in the workspace.
+     */
+    public List<String> getAccessibleFileUuids(Long userId, Long workspaceId) {
+        return fileRepository.findByWorkspaceIdAndStatus(workspaceId, FileStatus.ACTIVE,
+                        org.springframework.data.domain.Pageable.unpaged())
+                .map(FileEntity::getUuid)
+                .getContent();
     }
 }

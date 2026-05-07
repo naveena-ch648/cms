@@ -99,6 +99,11 @@ public class FileEntity {
     @Column(name = "thumbnail_key", length = 512)
     private String thumbnailKey;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "workflow_state", nullable = false, length = 20)
+    @Builder.Default
+    private WorkflowState workflowState = WorkflowState.DRAFT;
+
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "current_version_id")
     private FileVersion currentVersion;

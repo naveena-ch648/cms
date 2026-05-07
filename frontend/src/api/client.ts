@@ -22,7 +22,7 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if ((error.response?.status === 401 || error.response?.status === 403) && !originalRequest._retry) {
       originalRequest._retry = true;
       const refreshToken = localStorage.getItem('refreshToken');
       if (refreshToken) {
@@ -41,6 +41,9 @@ apiClient.interceptors.response.use(
           localStorage.removeItem('refreshToken');
           window.location.href = '/login';
         }
+      } else {
+        localStorage.removeItem('accessToken');
+        window.location.href = '/login';
       }
     }
     return Promise.reject(error);

@@ -29,6 +29,7 @@ public class CommentService {
     private final UserRepository userRepository;
     private final MentionService mentionService;
     private final AuditService auditService;
+    private final ActivityEventService activityEventService;
 
     @Transactional(readOnly = true)
     public Page<CommentDto> getComments(Long fileId, Pageable pageable) {
@@ -95,6 +96,17 @@ public class CommentService {
                     comment.getId(), null, null);
         } catch (Exception e) {
             log.warn("Failed to log audit event for comment creation: {}", e.getMessage());
+        }
+
+        // Record activity event
+        if (file != null) {
+            try {
+                activityEventService.recordEvent(user, com.cms.entity.ActivityEvent.ActionType.COMMENT_ADDED,
+                        "FILE", file.getUuid(), file.getName(),
+                        file.getWorkspace(), file.getWorkspace().getOrganization(), null);
+            } catch (Exception e) {
+                log.warn("Failed to record activity event for comment: {}", e.getMessage());
+            }
         }
 
         return CommentDto.from(comment);

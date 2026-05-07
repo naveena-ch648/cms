@@ -35,4 +35,6 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
 
     @Query("SELECT f.uuid FROM FileEntity f WHERE f.workspace.uuid = :workspaceUuid AND f.status = 'ACTIVE'")
     List<String> findUuidsByWorkspaceUuid(@Param("workspaceUuid") String workspaceUuid);
+
+    Page<FileEntity> findByWorkspaceIdInAndStatusOrderByLastAccessedAtDesc(List<Long> workspaceIds, FileStatus status, Pageable pageable);
 }

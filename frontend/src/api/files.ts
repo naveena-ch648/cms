@@ -1,4 +1,4 @@
-import axios from 'axios';
+import apiClient from './client';
 import type {
   FileInfo,
   UploadSession,
@@ -10,17 +10,17 @@ import type {
   PagedResponse,
 } from '../types/file';
 
-const API_BASE = '/api/files';
+const API_BASE = '/files';
 
 export const filesApi = {
   // List files in a folder
   listFiles: (folderId: string, params?: { page?: number; size?: number; sort?: string; direction?: string }) =>
-    axios.get<{ data: PagedResponse<FileInfo> }>(API_BASE, { params: { folderId, ...params } })
+    apiClient.get<{ data: PagedResponse<FileInfo> }>(API_BASE, { params: { folderId, ...params } })
       .then(r => r.data.data),
 
   // Get file details
   getFile: (fileId: string) =>
-    axios.get<{ data: FileInfo }>(`${API_BASE}/${fileId}`).then(r => r.data.data),
+    apiClient.get<{ data: FileInfo }>(`${API_BASE}/${fileId}`).then(r => r.data.data),
 
   // Upload single file
   uploadFile: (file: File, folderId: string, options?: { description?: string; tags?: string[]; onDuplicate?: string },
@@ -32,7 +32,7 @@ export const filesApi = {
     if (options?.tags) formData.append('tags', JSON.stringify(options.tags));
     if (options?.onDuplicate) formData.append('onDuplicate', options.onDuplicate);
 
-    return axios.post<{ data: FileInfo }>(`${API_BASE}/upload`, formData, {
+    return apiClient.post<{ data: FileInfo }>(`${API_BASE}/upload`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: (e) => {
         if (onProgress && e.total) {
@@ -47,67 +47,92 @@ export const filesApi = {
     fileName: string; fileSize: number; mimeType: string; folderId: string;
     chunkSize?: number; description?: string; tags?: string[]; onDuplicate?: string;
   }) =>
-    axios.post<{ data: UploadSession }>(`${API_BASE}/upload/initiate`, params).then(r => r.data.data),
+    apiClient.post<{ data: UploadSession }>(`${API_BASE}/upload/initiate`, params).then(r => r.data.data),
 
   // Upload a chunk
   uploadChunk: (sessionId: string, chunkNumber: number, data: ArrayBuffer) =>
-    axios.put<{ data: ChunkStatus }>(`${API_BASE}/upload/${sessionId}/chunks/${chunkNumber}`, data, {
+    apiClient.put<{ data: ChunkStatus }>(`${API_BASE}/upload/${sessionId}/chunks/${chunkNumber}`, data, {
       headers: { 'Content-Type': 'application/octet-stream' },
     }).then(r => r.data.data),
 
   // Complete chunked upload
   completeChunkedUpload: (sessionId: string, checksumSha256?: string) =>
-    axios.post<{ data: FileInfo }>(`${API_BASE}/upload/${sessionId}/complete`, { checksumSha256 })
+    apiClient.post<{ data: FileInfo }>(`${API_BASE}/upload/${sessionId}/complete`, { checksumSha256 })
       .then(r => r.data.data),
 
   // Abort chunked upload
   abortUpload: (sessionId: string) =>
-    axios.delete(`${API_BASE}/upload/${sessionId}`),
+    apiClient.delete(`${API_BASE}/upload/${sessionId}`),
 
   // Get upload session status
   getUploadStatus: (sessionId: string) =>
-    axios.get<{ data: UploadSessionStatus }>(`${API_BASE}/upload/${sessionId}/status`).then(r => r.data.data),
+    apiClient.get<{ data: UploadSessionStatus }>(`${API_BASE}/upload/${sessionId}/status`).then(r => r.data.data),
 
   // Download file (returns redirect URL)
   downloadFile: (fileId: string) =>
-    axios.get(`${API_BASE}/${fileId}/download`, { maxRedirects: 0, validateStatus: s => s === 302 })
+    apiClient.get(`${API_BASE}/${fileId}/download`, { maxRedirects: 0, validateStatus: s => s === 302 })
       .then(r => r.headers.location as string),
 
   // Get preview URL
   getPreviewUrl: (fileId: string) =>
-    axios.get<{ data: { previewUrl: string; mimeType: string; expiresAt: string } }>(`${API_BASE}/${fileId}/preview`)
+    apiClient.get<{ data: { previewUrl: string; mimeType: string; expiresAt: string } }>(`${API_BASE}/${fileId}/preview`)
       .then(r => r.data.data),
 
   // Update file metadata
   updateFile: (fileId: string, update: FileUpdateRequest) =>
-    axios.patch<{ data: FileInfo }>(`${API_BASE}/${fileId}`, update).then(r => r.data.data),
+    apiClient.patch<{ data: FileInfo }>(`${API_BASE}/${fileId}`, update).then(r => r.data.data),
 
   // Move file
   moveFile: (fileId: string, req: FileMoveRequest) =>
-    axios.post<{ data: FileInfo }>(`${API_BASE}/${fileId}/move`, req).then(r => r.data.data),
+    apiClient.post<{ data: FileInfo }>(`${API_BASE}/${fileId}/move`, req).then(r => r.data.data),
 
   // Copy file
   copyFile: (fileId: string, req: FileMoveRequest) =>
-    axios.post<{ data: FileInfo }>(`${API_BASE}/${fileId}/copy`, req).then(r => r.data.data),
+    apiClient.post<{ data: FileInfo }>(`${API_BASE}/${fileId}/copy`, req).then(r => r.data.data),
 
   // Trash file
   trashFile: (fileId: string) =>
-    axios.delete<{ data: FileInfo }>(`${API_BASE}/${fileId}`).then(r => r.data.data),
+    apiClient.delete<{ data: FileInfo }>(`${API_BASE}/${fileId}`).then(r => r.data.data),
 
   // Restore from trash
   restoreFile: (fileId: string) =>
-    axios.post<{ data: FileInfo }>(`${API_BASE}/${fileId}/restore`).then(r => r.data.data),
+    apiClient.post<{ data: FileInfo }>(`${API_BASE}/${fileId}/restore`).then(r => r.data.data),
 
   // Permanent delete
   permanentDelete: (fileId: string) =>
-    axios.delete(`${API_BASE}/${fileId}/permanent`),
+    apiClient.delete(`${API_BASE}/${fileId}/permanent`),
 
   // List trash
   listTrash: (workspaceId: string, params?: { page?: number; size?: number }) =>
-    axios.get<{ data: PagedResponse<FileInfo> }>(`${API_BASE}/trash`, { params: { workspaceId, ...params } })
+    apiClient.get<{ data: PagedResponse<FileInfo> }>(`${API_BASE}/trash`, { params: { workspaceId, ...params } })
       .then(r => r.data.data),
 
   // Get storage quota
   getQuota: () =>
-    axios.get<{ data: StorageQuota }>(`${API_BASE}/quota`).then(r => r.data.data),
+    apiClient.get<{ data: StorageQuota }>(`${API_BASE}/quota`).then(r => r.data.data),
+
+  // Filter files by metadata and tags
+  filterFiles: (params: {
+    workspaceId: string;
+    query?: string;
+    tags?: string[];
+    fileType?: string[];
+    dateFrom?: string;
+    dateTo?: string;
+    page?: number;
+    size?: number;
+    sortBy?: string;
+    sortOrder?: string;
+    metadataFilters?: Record<string, string>;
+  }) => {
+    const queryParams: Record<string, unknown> = { ...params };
+    delete queryParams.metadataFilters;
+    if (params.metadataFilters) {
+      for (const [key, value] of Object.entries(params.metadataFilters)) {
+        (queryParams as Record<string, string>)[`meta.${key}`] = value;
+      }
+    }
+    return apiClient.get<{ data: unknown }>(`${API_BASE}/filter`, { params: queryParams })
+      .then(r => r.data.data);
+  },
 };

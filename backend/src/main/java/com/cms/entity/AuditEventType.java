@@ -1,0 +1,45 @@
+package com.cms.entity;
+
+public enum AuditEventType {
+    // Authentication
+    LOGIN_SUCCESS,
+    LOGIN_FAILURE,
+    LOGOUT,
+    PASSWORD_CHANGED,
+    TOKEN_REFRESHED,
+
+    // File operations
+    FILE_UPLOADED,
+    FILE_DOWNLOADED,
+    FILE_DELETED,
+    FILE_MOVED,
+    FILE_RENAMED,
+    FILE_VERSIONED,
+
+    // Permission changes
+    ROLE_ASSIGNED,
+    ROLE_REVOKED,
+    PERMISSION_GRANTED,
+    PERMISSION_REVOKED,
+
+    // Sharing
+    LINK_CREATED,
+    LINK_REVOKED,
+    LINK_ACCESSED,
+    LINK_EXPIRED,
+
+    // Workflow
+    WORKFLOW_STARTED,
+    APPROVAL_SUBMITTED,
+    APPROVAL_DECIDED,
+    STATE_CHANGED,
+
+    // System
+    SCHEDULED_CLEANUP,
+    REPORT_GENERATED,
+    ALERT_TRIGGERED,
+    BULK_IMPORT,
+    FOLDER_CREATED,
+    FOLDER_DELETED,
+    FOLDER_MOVED
+}

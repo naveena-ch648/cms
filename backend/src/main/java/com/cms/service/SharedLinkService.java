@@ -2,6 +2,7 @@ package com.cms.service;
 
 import com.cms.dto.sharing.*;
 import com.cms.entity.*;
+import com.cms.entity.ActivityEvent;
 import com.cms.exception.BusinessRuleException;
 import com.cms.exception.ResourceNotFoundException;
 import com.cms.repository.*;
@@ -38,6 +39,7 @@ public class SharedLinkService {
     private final PasswordEncoder passwordEncoder;
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
+    private final ActivityEventService activityEventService;
 
     private static final String SHARE_CACHE_PREFIX = "share_link:";
     private static final long SHARE_CACHE_TTL_MINUTES = 2;
@@ -111,6 +113,13 @@ public class SharedLinkService {
         auditService.log(workspace.getOrganization(), creator, "SHARE_LINK_CREATED",
                 "SharedLink", link.getId(),
                 "Created share link for " + request.getResourceType(), null);
+
+        // Record activity event
+        String targetName = file != null ? file.getName() : (folder != null ? folder.getName() : "Unknown");
+        String targetId = file != null ? file.getUuid() : (folder != null ? folder.getUuid() : link.getUuid());
+        activityEventService.recordEvent(creator, ActivityEvent.ActionType.FILE_SHARED,
+                request.getResourceType().toUpperCase(), targetId, targetName,
+                workspace, workspace.getOrganization(), null);
 
         return link;
     }

@@ -53,6 +53,21 @@ public class NotificationService {
     }
 
     @Transactional(readOnly = true)
+    public Page<NotificationDto> getNotifications(Long recipientId, String type, Pageable pageable) {
+        if (type != null && !type.isBlank()) {
+            try {
+                Notification.Type notificationType = Notification.Type.valueOf(type.toUpperCase());
+                return notificationRepository.findByRecipientIdAndTypeOrderByCreatedAtDesc(recipientId, notificationType, pageable)
+                        .map(NotificationDto::from);
+            } catch (IllegalArgumentException e) {
+                // Invalid type, fall through to unfiltered
+            }
+        }
+        return notificationRepository.findByRecipientIdOrderByCreatedAtDesc(recipientId, pageable)
+                .map(NotificationDto::from);
+    }
+
+    @Transactional(readOnly = true)
     public long getUnreadCount(Long recipientId) {
         String key = UNREAD_COUNT_KEY_PREFIX + recipientId;
         String cached = redisTemplate.opsForValue().get(key);

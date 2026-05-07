@@ -8,6 +8,7 @@ export interface FileInfo {
   folderName?: string;
   workspaceId: string;
   status: 'ACTIVE' | 'TRASHED' | 'DELETED';
+  workflowState?: 'DRAFT' | 'REVIEW' | 'APPROVED' | 'PUBLISHED' | 'ARCHIVED';
   checksumSha256?: string;
   description?: string;
   tags: string[];

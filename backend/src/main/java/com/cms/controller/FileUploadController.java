@@ -4,6 +4,8 @@ import com.cms.dto.ApiResponse;
 import com.cms.dto.file.*;
 import com.cms.entity.FileEntity;
 import com.cms.entity.User;
+import com.cms.repository.UserRepository;
+import com.cms.security.UserPrincipal;
 import com.cms.service.FileUploadService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -17,11 +19,12 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 
 @RestController
-@RequestMapping("/api/files/upload")
+@RequestMapping("/api/v1/files/upload")
 @RequiredArgsConstructor
 public class FileUploadController {
 
     private final FileUploadService fileUploadService;
+    private final UserRepository userRepository;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<FileDto>> uploadFile(
@@ -30,8 +33,10 @@ public class FileUploadController {
             @RequestParam(value = "description", required = false) String description,
             @RequestParam(value = "tags", required = false) String tags,
             @RequestParam(value = "onDuplicate", required = false, defaultValue = "rename") String onDuplicate,
-            @AuthenticationPrincipal User user) throws IOException {
+            @AuthenticationPrincipal UserPrincipal principal) throws IOException {
 
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new IllegalStateException("User not found"));
         FileEntity created = fileUploadService.uploadSingleFile(file, folderId, description, tags, onDuplicate, user);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(FileDto.from(created)));
     }
@@ -39,8 +44,10 @@ public class FileUploadController {
     @PostMapping("/initiate")
     public ResponseEntity<ApiResponse<UploadInitiateResponse>> initiateChunkedUpload(
             @Valid @RequestBody UploadInitiateRequest request,
-            @AuthenticationPrincipal User user) {
+            @AuthenticationPrincipal UserPrincipal principal) {
 
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new IllegalStateException("User not found"));
         UploadInitiateResponse response = fileUploadService.initiateChunkedUpload(request, user);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(response));
     }
@@ -59,8 +66,10 @@ public class FileUploadController {
     public ResponseEntity<ApiResponse<FileDto>> completeUpload(
             @PathVariable String sessionId,
             @RequestBody(required = false) java.util.Map<String, String> body,
-            @AuthenticationPrincipal User user) {
+            @AuthenticationPrincipal UserPrincipal principal) {
 
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new IllegalStateException("User not found"));
         String checksum = body != null ? body.get("checksumSha256") : null;
         FileEntity file = fileUploadService.completeChunkedUpload(sessionId, checksum, user);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(FileDto.from(file)));

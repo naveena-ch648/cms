@@ -1,7 +1,10 @@
 package com.cms.controller;
 
+import com.cms.annotation.Audited;
 import com.cms.dto.ApiResponse;
 import com.cms.dto.auth.*;
+import com.cms.entity.AuditCategory;
+import com.cms.entity.AuditEventType;
 import com.cms.entity.User;
 import com.cms.entity.UserOrganizationRole;
 import com.cms.repository.UserOrganizationRoleRepository;
@@ -27,6 +30,7 @@ public class AuthController {
     private final UserOrganizationRoleRepository userOrgRoleRepository;
 
     @PostMapping("/login")
+    @Audited(event = AuditEventType.LOGIN_SUCCESS, category = AuditCategory.AUTHENTICATION)
     public ResponseEntity<ApiResponse<TokenResponse>> login(
             @Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
         // For now, login against the platform org (id=1). Multi-tenant login
@@ -44,6 +48,7 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
+    @Audited(event = AuditEventType.LOGOUT, category = AuditCategory.AUTHENTICATION)
     public ResponseEntity<ApiResponse<Map<String, String>>> logout(HttpServletRequest request) {
         String bearerToken = request.getHeader("Authorization");
         if (bearerToken != null && bearerToken.startsWith("Bearer ")) {

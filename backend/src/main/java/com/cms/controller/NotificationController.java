@@ -24,11 +24,12 @@ public class NotificationController {
     public ResponseEntity<ApiResponse<Page<NotificationDto>>> getNotifications(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String type,
             @AuthenticationPrincipal UserPrincipal principal) {
 
         int pageSize = Math.min(size, 50);
         Page<NotificationDto> notifications = notificationService.getNotifications(
-                principal.getId(), PageRequest.of(page, pageSize));
+                principal.getId(), type, PageRequest.of(page, pageSize));
         return ResponseEntity.ok(ApiResponse.ok(notifications));
     }
 

@@ -290,7 +290,7 @@ This constitution must be treated as a non-negotiable foundation for all develop
 # Step  12. DASHBOARD & NOTIFICATIONS
 
 
-/speckit.specify Build dashboard showing recent files, shared items, approvals, storage usage, activity logs, and alerts.
+/speckit.specify Build dashboard showing recent files, shared items, approvals, storage usage, activity logs, and alerts. 
 
 /speckit.plan Phase 12:
 - Dashboard APIs
@@ -313,7 +313,7 @@ This constitution must be treated as a non-negotiable foundation for all develop
 /speckit.tasks
 /speckit.implement
 
-
+ 
 # Step  14. ADMIN CONSOLE
 
 
@@ -327,7 +327,7 @@ This constitution must be treated as a non-negotiable foundation for all develop
 /speckit.tasks
 /speckit.implement
 
-# Step  14. INTEGRATIONS
+# Step  15. INTEGRATIONS
 
 /speckit.specify Build integrations with Google Drive, and webhooks. Support import/export and sync.
 

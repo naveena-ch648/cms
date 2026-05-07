@@ -7,6 +7,7 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import java.net.URI;
@@ -26,6 +27,9 @@ public class MinioConfig {
     @Value("${minio.region}")
     private String region;
 
+    @Value("${minio.public-endpoint:#{null}}")
+    private String publicEndpoint;
+
     @Bean
     public S3Client s3Client() {
         return S3Client.builder()
@@ -39,11 +43,15 @@ public class MinioConfig {
 
     @Bean
     public S3Presigner s3Presigner() {
+        String presignEndpoint = (publicEndpoint != null && !publicEndpoint.isBlank()) ? publicEndpoint : endpoint;
         return S3Presigner.builder()
-                .endpointOverride(URI.create(endpoint))
+                .endpointOverride(URI.create(presignEndpoint))
                 .credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create(accessKey, secretKey)))
                 .region(Region.of(region))
+                .serviceConfiguration(S3Configuration.builder()
+                        .pathStyleAccessEnabled(true)
+                        .build())
                 .build();
     }
 }

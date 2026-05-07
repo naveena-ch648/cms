@@ -1,14 +1,22 @@
 package com.cms.controller;
 
+import com.cms.annotation.Audited;
 import com.cms.dto.ApiResponse;
 import com.cms.dto.file.FileDto;
+import com.cms.entity.AuditCategory;
+import com.cms.entity.AuditEventType;
 import com.cms.dto.file.StorageQuotaDto;
+import com.cms.dto.search.SearchRequest;
+import com.cms.dto.search.SearchResponse;
 import com.cms.entity.FileEntity;
 import com.cms.entity.FileEntity.FileStatus;
 import com.cms.entity.Folder;
 import com.cms.entity.User;
 import com.cms.repository.FolderRepository;
+import com.cms.repository.UserRepository;
+import com.cms.security.UserPrincipal;
 import com.cms.service.FileService;
+import com.cms.service.SearchService;
 import com.cms.service.StorageQuotaService;
 import com.cms.service.StorageService;
 import lombok.RequiredArgsConstructor;
@@ -23,18 +31,21 @@ import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
 import java.time.Duration;
-import java.time.Instant;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/files")
+@RequestMapping("/api/v1/files")
 @RequiredArgsConstructor
 public class FileController {
 
     private final FileService fileService;
     private final FolderRepository folderRepository;
+    private final UserRepository userRepository;
     private final StorageService storageService;
     private final StorageQuotaService storageQuotaService;
+    private final SearchService searchService;
 
     @GetMapping
     public ResponseEntity<ApiResponse<Page<FileDto>>> listFiles(
@@ -67,6 +78,7 @@ public class FileController {
     }
 
     @GetMapping("/{fileId}/download")
+    @Audited(event = AuditEventType.FILE_DOWNLOADED, category = AuditCategory.FILE_OPERATION, resourceType = "file")
     public ResponseEntity<Void> downloadFile(@PathVariable String fileId) {
         FileEntity file = fileService.getByUuid(fileId);
         fileService.incrementDownloadCount(fileId);
@@ -75,31 +87,14 @@ public class FileController {
         return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(url)).build();
     }
 
-    @GetMapping("/{fileId}/preview")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> previewFile(@PathVariable String fileId) {
-        FileEntity file = fileService.getByUuid(fileId);
-        String mimeType = file.getMimeType();
-
-        if (!isPreviewable(mimeType)) {
-            throw new IllegalArgumentException("File type not previewable: " + mimeType);
-        }
-
-        String url = storageService.presignGetUrl(file.getStorageBucket(), file.getStorageKey(), Duration.ofHours(1));
-        Instant expiresAt = Instant.now().plus(Duration.ofHours(1));
-
-        return ResponseEntity.ok(ApiResponse.ok(Map.of(
-                "previewUrl", url,
-                "mimeType", mimeType,
-                "expiresAt", expiresAt.toString()
-        )));
-    }
-
     @PatchMapping("/{fileId}")
     public ResponseEntity<ApiResponse<FileDto>> updateFile(
             @PathVariable String fileId,
             @RequestBody Map<String, Object> body,
-            @AuthenticationPrincipal User user) {
+            @AuthenticationPrincipal UserPrincipal principal) {
 
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new IllegalStateException("User not found"));
         String name = body.containsKey("name") ? (String) body.get("name") : null;
         String description = body.containsKey("description") ? (String) body.get("description") : null;
         String tags = body.containsKey("tags") ? body.get("tags").toString() : null;
@@ -109,11 +104,14 @@ public class FileController {
     }
 
     @PostMapping("/{fileId}/move")
+    @Audited(event = AuditEventType.FILE_MOVED, category = AuditCategory.FILE_OPERATION, resourceType = "file")
     public ResponseEntity<ApiResponse<FileDto>> moveFile(
             @PathVariable String fileId,
             @RequestBody Map<String, String> body,
-            @AuthenticationPrincipal User user) {
+            @AuthenticationPrincipal UserPrincipal principal) {
 
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new IllegalStateException("User not found"));
         String targetFolderId = body.get("targetFolderId");
         String onDuplicate = body.getOrDefault("onDuplicate", "rename");
 
@@ -125,8 +123,10 @@ public class FileController {
     public ResponseEntity<ApiResponse<FileDto>> copyFile(
             @PathVariable String fileId,
             @RequestBody Map<String, String> body,
-            @AuthenticationPrincipal User user) {
+            @AuthenticationPrincipal UserPrincipal principal) {
 
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new IllegalStateException("User not found"));
         String targetFolderId = body.get("targetFolderId");
         String onDuplicate = body.getOrDefault("onDuplicate", "rename");
 
@@ -135,10 +135,13 @@ public class FileController {
     }
 
     @DeleteMapping("/{fileId}")
+    @Audited(event = AuditEventType.FILE_DELETED, category = AuditCategory.FILE_OPERATION, resourceType = "file")
     public ResponseEntity<ApiResponse<FileDto>> trashFile(
             @PathVariable String fileId,
-            @AuthenticationPrincipal User user) {
+            @AuthenticationPrincipal UserPrincipal principal) {
 
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new IllegalStateException("User not found"));
         FileEntity trashed = fileService.trashFile(fileId, user);
         return ResponseEntity.ok(ApiResponse.ok(FileDto.from(trashed)));
     }
@@ -150,6 +153,7 @@ public class FileController {
     }
 
     @DeleteMapping("/{fileId}/permanent")
+    @Audited(event = AuditEventType.FILE_DELETED, category = AuditCategory.FILE_OPERATION, resourceType = "file")
     public ResponseEntity<Void> permanentDelete(@PathVariable String fileId) {
         fileService.permanentDelete(fileId);
         return ResponseEntity.noContent().build();
@@ -170,23 +174,48 @@ public class FileController {
     }
 
     @GetMapping("/quota")
-    public ResponseEntity<ApiResponse<StorageQuotaDto>> getQuota(@AuthenticationPrincipal User user) {
-        // Get org from user context
-        var quota = storageQuotaService.getQuotaForOrg(user.getOrganization().getId());
+    public ResponseEntity<ApiResponse<StorageQuotaDto>> getQuota(@AuthenticationPrincipal UserPrincipal principal) {
+        var quota = storageQuotaService.getQuotaForOrg(principal.getOrganizationId());
         return ResponseEntity.ok(ApiResponse.ok(StorageQuotaDto.from(quota)));
     }
 
-    private boolean isPreviewable(String mimeType) {
-        if (mimeType == null) return false;
-        return mimeType.startsWith("image/") ||
-               mimeType.equals("application/pdf") ||
-               mimeType.startsWith("text/") ||
-               mimeType.startsWith("video/") ||
-               mimeType.equals("application/vnd.openxmlformats-officedocument.wordprocessingml.document") ||
-               mimeType.equals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") ||
-               mimeType.equals("application/vnd.openxmlformats-officedocument.presentationml.presentation") ||
-               mimeType.equals("application/msword") ||
-               mimeType.equals("application/vnd.ms-excel") ||
-               mimeType.equals("application/vnd.ms-powerpoint");
+    @GetMapping("/filter")
+    public ResponseEntity<ApiResponse<SearchResponse>> filterFiles(
+            @RequestParam String workspaceId,
+            @RequestParam(required = false) String query,
+            @RequestParam(required = false) List<String> tags,
+            @RequestParam(required = false) List<String> fileType,
+            @RequestParam(required = false) String dateFrom,
+            @RequestParam(required = false) String dateTo,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "relevance") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortOrder,
+            @RequestParam Map<String, String> allParams,
+            @AuthenticationPrincipal UserPrincipal principal) {
+
+        Map<String, String> metadataFilters = new HashMap<>();
+        for (Map.Entry<String, String> entry : allParams.entrySet()) {
+            if (entry.getKey().startsWith("meta.")) {
+                metadataFilters.put(entry.getKey().substring(5), entry.getValue());
+            }
+        }
+
+        SearchRequest searchRequest = SearchRequest.builder()
+                .workspaceId(workspaceId)
+                .query(query)
+                .tags(tags)
+                .metadataFilters(metadataFilters.isEmpty() ? null : metadataFilters)
+                .fileType(fileType)
+                .dateFrom(dateFrom)
+                .dateTo(dateTo)
+                .page(page)
+                .size(Math.min(size, 100))
+                .sortBy(sortBy)
+                .sortOrder(sortOrder)
+                .build();
+
+        SearchResponse response = searchService.search(searchRequest);
+        return ResponseEntity.ok(ApiResponse.ok(response));
     }
 }

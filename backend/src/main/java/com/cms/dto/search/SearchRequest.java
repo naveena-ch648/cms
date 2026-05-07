@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
+import java.util.Map;
 
 @Data
 @Builder
@@ -35,4 +36,7 @@ public class SearchRequest {
 
     @Builder.Default
     private String sortOrder = "desc";
+
+    private List<String> tags;
+    private Map<String, String> metadataFilters;
 }

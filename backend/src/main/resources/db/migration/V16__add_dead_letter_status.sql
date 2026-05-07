@@ -1,0 +1,2 @@
+-- Add DEAD_LETTER status to embedding_jobs for DLQ handling
+ALTER TABLE embedding_jobs MODIFY COLUMN status ENUM('PENDING','PROCESSING','COMPLETED','FAILED','DEAD_LETTER') NOT NULL DEFAULT 'PENDING';

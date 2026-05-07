@@ -190,6 +190,44 @@ public class SearchService {
             }));
         }
 
+        // Tag filters (AND logic)
+        if (request.getTags() != null && !request.getTags().isEmpty()) {
+            for (String tag : request.getTags()) {
+                boolBuilder.filter(f -> f.term(t -> t
+                        .field("tags")
+                        .value(FieldValue.of(tag.toLowerCase()))
+                ));
+            }
+        }
+
+        // Metadata filters
+        if (request.getMetadataFilters() != null && !request.getMetadataFilters().isEmpty()) {
+            for (Map.Entry<String, String> entry : request.getMetadataFilters().entrySet()) {
+                String fieldKey = entry.getKey();
+                String fieldValue = entry.getValue();
+                String metaField = "metadata." + fieldKey.toLowerCase().replaceAll("[^a-z0-9_]", "_");
+
+                if (fieldKey.endsWith(".gte")) {
+                    String actualField = "metadata." + fieldKey.replace(".gte", "").toLowerCase().replaceAll("[^a-z0-9_]", "_");
+                    boolBuilder.filter(f -> f.range(r -> r
+                            .field(actualField)
+                            .gte(org.opensearch.client.json.JsonData.of(fieldValue))
+                    ));
+                } else if (fieldKey.endsWith(".lte")) {
+                    String actualField = "metadata." + fieldKey.replace(".lte", "").toLowerCase().replaceAll("[^a-z0-9_]", "_");
+                    boolBuilder.filter(f -> f.range(r -> r
+                            .field(actualField)
+                            .lte(org.opensearch.client.json.JsonData.of(fieldValue))
+                    ));
+                } else {
+                    boolBuilder.filter(f -> f.term(t -> t
+                            .field(metaField)
+                            .value(FieldValue.of(fieldValue))
+                    ));
+                }
+            }
+        }
+
         return Query.of(q -> q.bool(boolBuilder.build()));
     }
 
