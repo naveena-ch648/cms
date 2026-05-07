@@ -1,6 +1,9 @@
 package com.cms.service;
 
+import com.cms.dto.admin.StorageQuotaDetailResponse;
+import com.cms.dto.admin.StorageQuotaUpdateRequest;
 import com.cms.entity.StorageQuota;
+import com.cms.exception.BusinessRuleException;
 import com.cms.repository.StorageQuotaRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -58,6 +61,64 @@ public class StorageQuotaService {
         StorageQuota quota = getQuotaForOrg(organizationId);
         quota.setUsedStorageBytes(Math.max(0, quota.getUsedStorageBytes() + deltaBytes));
         storageQuotaRepository.save(quota);
+    }
+
+    @Transactional
+    public StorageQuotaDetailResponse updateQuota(Long organizationId, StorageQuotaUpdateRequest request) {
+        StorageQuota quota = getQuotaForOrg(organizationId);
+
+        // Validate
+        if (request.getMaxStorageBytes() != null && request.getMaxStorageBytes() <= 0) {
+            throw new BusinessRuleException("VALIDATION_ERROR", "maxStorageBytes must be positive");
+        }
+        if (request.getMaxFileSizeBytes() != null && request.getMaxFileSizeBytes() <= 0) {
+            throw new BusinessRuleException("VALIDATION_ERROR", "maxFileSizeBytes must be positive");
+        }
+        if (request.getTrashRetentionDays() != null &&
+                (request.getTrashRetentionDays() < 1 || request.getTrashRetentionDays() > 365)) {
+            throw new BusinessRuleException("VALIDATION_ERROR", "trashRetentionDays must be between 1 and 365");
+        }
+        if (request.getAllowedExtensions() != null && request.getBlockedExtensions() != null) {
+            throw new BusinessRuleException("VALIDATION_ERROR",
+                    "allowedExtensions and blockedExtensions cannot both be set");
+        }
+
+        // Update only provided fields
+        if (request.getMaxStorageBytes() != null) {
+            quota.setMaxStorageBytes(request.getMaxStorageBytes());
+        }
+        if (request.getMaxFileSizeBytes() != null) {
+            quota.setMaxFileSizeBytes(request.getMaxFileSizeBytes());
+        }
+        if (request.getTrashRetentionDays() != null) {
+            quota.setTrashRetentionDays(request.getTrashRetentionDays());
+        }
+        if (request.getAllowedExtensions() != null) {
+            quota.setAllowedExtensions(toJson(request.getAllowedExtensions()));
+        }
+        if (request.getBlockedExtensions() != null) {
+            quota.setBlockedExtensions(toJson(request.getBlockedExtensions()));
+        }
+
+        storageQuotaRepository.save(quota);
+        return StorageQuotaDetailResponse.from(quota, objectMapper);
+    }
+
+    public StorageQuotaDetailResponse getQuotaDetail(Long organizationId) {
+        StorageQuota quota = getQuotaForOrg(organizationId);
+        return StorageQuotaDetailResponse.from(quota, objectMapper);
+    }
+
+    private String toJson(List<String> list) {
+        if (list == null || list.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(list);
+        } catch (Exception e) {
+            log.warn("Failed to serialize extensions list: {}", e.getMessage());
+            return null;
+        }
     }
 
     private String getFileExtension(String fileName) {

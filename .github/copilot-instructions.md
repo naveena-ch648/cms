@@ -19,6 +19,11 @@ Auto-generated from all feature plans. Last updated: 2026-05-06
 - MySQL 8.0 (port 3307, root/root) with Flyway migrations (next: V19), Redis 7 (port 6379) for notification counts and dashboard caching (012-dashboard-notifications)
 - Java 17 (Spring Boot 3.3.5 backend), TypeScript 5.6 (React 18 frontend) + Spring Data JPA, Spring Security, Spring Data Redis, jjwt 0.12.6, OpenSearch Java Client 2.x, React 18, React Router 6.28, Axios 1.7.7, Vite 6 (013-audit-compliance)
 - MySQL 8.0 (port 3307, root/root) with Flyway migrations (next: V20), Redis 7 (port 6379) for event buffering and alert rate tracking, OpenSearch 2.x for audit event indexing (013-audit-compliance)
+- MySQL 8.0 (port 3307, root/root), Redis 7 (port 6379) (014-admin-console)
+- Java 17 (Spring Boot 3.3.5 backend), Python 3.11 (sync workers), TypeScript 5.6 (React 18 frontend) + Spring Boot 3.3.5, Google Drive API v3 (google-api-services-drive), Spring Data JPA, Spring Data Redis, React 18, Axios 1.7.7, Vite 6; Python: google-auth, google-api-python-client, redis-py, boto3 (014-admin-console)
+- MySQL 8.0 (port 3307, root/root) with Flyway migrations (next: V22), Redis 7 (port 6379) for job queues and webhook delivery scheduling, MinIO (file content) (014-admin-console)
+- Java 17 (Spring Boot 3.3.5 backend), Python 3.11 (AI workers), TypeScript 5.6 (React 18 frontend) + Spring Data JPA, Spring Data Redis, OpenAI API (via existing LLM provider), sentence-transformers, Qdrant client, regex-based NLP; React 18, Axios 1.7.7, Vite 6 (014-admin-console)
+- MySQL 8.0 (port 3307, root/root) with Flyway migrations (next: V23), Redis 7 (port 6379) for job queue, Qdrant for content fingerprints, MinIO for file content (014-admin-console)
 
 - Java 17+ (Spring Boot 3.x backend), TypeScript 5.x (React 18 frontend) + Spring Boot 3.x, Spring Security, Spring Data JPA, React 18, React Router, Axios, jjwt (JWT library) (001-multi-tenant-foundation)
 
@@ -39,9 +44,9 @@ npm test; npm run lint
 Java 17+ (Spring Boot 3.x backend), TypeScript 5.x (React 18 frontend): Follow standard conventions
 
 ## Recent Changes
-- 013-audit-compliance: Added Java 17 (Spring Boot 3.3.5 backend), TypeScript 5.6 (React 18 frontend) + Spring Data JPA, Spring Security, Spring Data Redis, jjwt 0.12.6, OpenSearch Java Client 2.x, React 18, React Router 6.28, Axios 1.7.7, Vite 6
-- 012-dashboard-notifications: Added Java 17 (Spring Boot 3.3.5 backend), TypeScript 5.6 (React 18 frontend) + Spring Data JPA, Spring Security, Spring Data Redis, jjwt 0.12.6, React 18, React Router 6.28, Axios 1.7.7, Vite 6
-- 011-workflow-approvals: Added Java 17 (Spring Boot 3.3.5 backend), TypeScript 5.6 (React 18 frontend) + Spring Data JPA, Spring Security, Spring Data Redis, jjwt 0.12.6, React 18, React Router 6.28, Axios 1.7.7, Vite 6
+- 014-admin-console: Added Java 17 (Spring Boot 3.3.5 backend), Python 3.11 (AI workers), TypeScript 5.6 (React 18 frontend) + Spring Data JPA, Spring Data Redis, OpenAI API (via existing LLM provider), sentence-transformers, Qdrant client, regex-based NLP; React 18, Axios 1.7.7, Vite 6
+- 014-admin-console: Added Java 17 (Spring Boot 3.3.5 backend), Python 3.11 (sync workers), TypeScript 5.6 (React 18 frontend) + Spring Boot 3.3.5, Google Drive API v3 (google-api-services-drive), Spring Data JPA, Spring Data Redis, React 18, Axios 1.7.7, Vite 6; Python: google-auth, google-api-python-client, redis-py, boto3
+- 014-admin-console: Added Java 17 (Spring Boot 3.3.5 backend), TypeScript 5.6 (React 18 frontend) + Spring Data JPA, Spring Security, Spring Data Redis, jjwt 0.12.6, React 18, React Router 6.28, Axios 1.7.7, Vite 6
 
 
 <!-- MANUAL ADDITIONS START -->

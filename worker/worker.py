@@ -4,6 +4,7 @@ import json
 import signal
 import sys
 import time
+import threading
 import traceback
 
 import redis
@@ -19,6 +20,9 @@ from processors.preview_office import process_office_preview
 from processors.search_indexer import process_search_index
 from processors.embeddings import process_embedding
 from processors.embedding_config import EmbeddingConfig
+from processors.sync_worker import run_integration_worker
+from processors.webhook_worker import run_webhook_worker
+from processors.ai_dispatcher import run_ai_worker
 
 
 running = True
@@ -117,8 +121,37 @@ def main():
 
     print(f"Worker starting — Redis at {Config.REDIS_HOST}:{Config.REDIS_PORT}")
     print(f"Listening on queues: {Config.QUEUE_NAME}, {Config.SEARCH_INDEX_QUEUE}, {EmbeddingConfig.EMBEDDING_QUEUE}")
+    print(f"Integration worker listening on: integration:import, integration:export")
+    print(f"AI worker listening on: {Config.AI_QUEUE}")
 
     r = get_redis_client()
+
+    # Start integration worker in a separate thread
+    integration_redis = get_redis_client()
+    integration_thread = threading.Thread(
+        target=run_integration_worker,
+        args=(integration_redis, lambda: running),
+        daemon=True,
+    )
+    integration_thread.start()
+
+    # Start webhook delivery worker in a separate thread
+    webhook_redis = get_redis_client()
+    webhook_thread = threading.Thread(
+        target=run_webhook_worker,
+        args=(webhook_redis, lambda: running),
+        daemon=True,
+    )
+    webhook_thread.start()
+
+    # Start AI automation worker in a separate thread
+    ai_redis = get_redis_client()
+    ai_thread = threading.Thread(
+        target=run_ai_worker,
+        args=(ai_redis, lambda: running),
+        daemon=True,
+    )
+    ai_thread.start()
 
     while running:
         try:

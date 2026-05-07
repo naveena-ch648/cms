@@ -17,7 +17,11 @@ export default function AppLayout() {
   const navItems = [
     { to: '/', icon: '⌂', label: 'Dashboard' },
     { to: '/workspaces', icon: '▤', label: 'Workspaces', match: '/workspaces' },
+    { to: '/integrations', icon: '🔗', label: 'Integrations' },
     { to: '/audit', icon: '🛡', label: 'Audit Log' },
+    ...(user?.organizationRole === 'Admin'
+      ? [{ to: '/admin', icon: '⚙', label: 'Admin' }]
+      : []),
   ];
 
   return (

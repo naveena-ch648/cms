@@ -139,6 +139,32 @@ public class UserService {
         return userRepository.save(user);
     }
 
+    @Transactional
+    public User deactivateWithSelfCheck(String uuid, Long currentUserId) {
+        User user = getById(uuid);
+
+        if (user.getId().equals(currentUserId)) {
+            throw new BusinessRuleException("SELF_DEACTIVATION", "Cannot deactivate your own account");
+        }
+
+        Long orgId = user.getOrganization().getId();
+        UserOrganizationRole orgRole = userOrgRoleRepository.findByUserIdAndOrganizationId(user.getId(), orgId)
+                .orElse(null);
+        if (orgRole != null) {
+            checkLastAdmin(orgRole, orgId);
+        }
+
+        user.setStatus(User.UserStatus.INACTIVE);
+        return userRepository.save(user);
+    }
+
+    @Transactional
+    public User activate(String uuid) {
+        User user = getById(uuid);
+        user.setStatus(User.UserStatus.ACTIVE);
+        return userRepository.save(user);
+    }
+
     private void checkLastAdmin(UserOrganizationRole currentRole, Long orgId) {
         if (currentRole.getRole().getName().equals("Admin")) {
             long adminCount = userOrgRoleRepository.countByOrganizationIdAndRoleId(orgId, currentRole.getRole().getId());

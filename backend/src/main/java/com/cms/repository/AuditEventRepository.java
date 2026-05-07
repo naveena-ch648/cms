@@ -39,4 +39,17 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, Long> {
 
     List<AuditEvent> findByOrganizationIdAndEventTypeAndUserIdAndCreatedAtAfter(
             Long organizationId, String eventType, Long userId, Instant after);
+
+    @Query("SELECT FUNCTION('DATE', e.createdAt), COUNT(e) FROM AuditEvent e " +
+           "WHERE e.organization.id = :orgId AND e.eventType = :eventType " +
+           "AND e.createdAt >= :since GROUP BY FUNCTION('DATE', e.createdAt) " +
+           "ORDER BY FUNCTION('DATE', e.createdAt)")
+    List<Object[]> countByOrgAndEventTypeGroupByDate(@Param("orgId") Long orgId,
+                                                      @Param("eventType") String eventType,
+                                                      @Param("since") Instant since);
+
+    @Query("SELECT e.user.id, e.user.firstName, e.user.lastName, COUNT(e) FROM AuditEvent e " +
+           "WHERE e.organization.id = :orgId AND e.createdAt >= :since AND e.user IS NOT NULL " +
+           "GROUP BY e.user.id, e.user.firstName, e.user.lastName ORDER BY COUNT(e) DESC")
+    List<Object[]> findTopActiveUsers(@Param("orgId") Long orgId, @Param("since") Instant since, Pageable pageable);
 }

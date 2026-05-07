@@ -9,6 +9,7 @@ import { WorkflowTransitionMenu } from './WorkflowTransitionMenu';
 import { WorkflowHistoryPanel } from './WorkflowHistoryPanel';
 import { workflowApi } from '../api/workflow';
 import apiClient from '../api/client';
+import AISuggestionsPanel from './ai/AISuggestionsPanel';
 
 interface EmbeddingStatus {
   status: string;
@@ -141,6 +142,10 @@ const FileDetailPanel: React.FC<FileDetailPanelProps> = ({ file, onClose, onDown
 
       <div style={{ marginTop: 16, borderTop: '1px solid #e0e0e0', paddingTop: 12 }}>
         <FileVersionHistory fileId={file.id} onVersionRestored={onFileUpdated} />
+      </div>
+
+      <div style={{ marginTop: 16, borderTop: '1px solid #e0e0e0', paddingTop: 12 }}>
+        <AISuggestionsPanel fileId={file.id} onTagsAccepted={onFileUpdated} />
       </div>
 
       <div style={{ marginTop: 16, borderTop: '1px solid #e0e0e0', paddingTop: 12 }}>

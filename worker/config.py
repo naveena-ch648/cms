@@ -29,3 +29,11 @@ class Config:
     SEARCH_INDEX_QUEUE = "search:index"
     SEARCH_INDEX_DLQ = "search:index:dlq"
     SEARCH_INDEX_MAX_RETRIES = 3
+
+    # AI Automation
+    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+    OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+    AI_QUEUE = "ai:process"
+    AI_DLQ = "ai:process:dlq"
+    AI_MAX_RETRIES = 3
+    AI_CONFIDENCE_THRESHOLD = int(os.environ.get("AI_CONFIDENCE_THRESHOLD", 70))

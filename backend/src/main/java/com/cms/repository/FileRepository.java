@@ -37,4 +37,6 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
     List<String> findUuidsByWorkspaceUuid(@Param("workspaceUuid") String workspaceUuid);
 
     Page<FileEntity> findByWorkspaceIdInAndStatusOrderByLastAccessedAtDesc(List<Long> workspaceIds, FileStatus status, Pageable pageable);
+
+    long countByOrganizationIdAndStatusNot(Long organizationId, FileStatus status);
 }

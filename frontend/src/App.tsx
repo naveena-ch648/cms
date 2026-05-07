@@ -11,6 +11,9 @@ import QAPage from './pages/QAPage';
 import PendingApprovalsPage from './pages/PendingApprovalsPage';
 import WorkflowTriggersPage from './pages/WorkflowTriggersPage';
 import AuditPage from './pages/AuditPage';
+import AdminPage from './pages/AdminPage';
+import AdminRoute from './components/admin/AdminRoute';
+import IntegrationsPage from './pages/IntegrationsPage';
 
 export default function App() {
   return (
@@ -23,11 +26,13 @@ export default function App() {
               <Route path="/" element={<DashboardPage />} />
               <Route path="/approvals" element={<PendingApprovalsPage />} />
               <Route path="/audit" element={<AuditPage />} />
+              <Route path="/integrations" element={<IntegrationsPage />} />
               <Route path="/workspaces" element={<WorkspaceListPage />} />
               <Route path="/workspaces/:workspaceId" element={<WorkspacePage />} />
               <Route path="/workspaces/:workspaceId/search" element={<SearchPage />} />
               <Route path="/workspaces/:workspaceId/qa" element={<QAPage />} />
               <Route path="/workspaces/:workspaceId/workflow-triggers" element={<WorkflowTriggersPage />} />
+              <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
             </Route>
           </Route>
         </Routes>

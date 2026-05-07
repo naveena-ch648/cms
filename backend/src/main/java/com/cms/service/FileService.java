@@ -38,6 +38,7 @@ public class FileService {
     private final FileIndexEventPublisher fileIndexEventPublisher;
     private final EmbeddingJobService embeddingJobService;
     private final ActivityEventService activityEventService;
+    private final AIAutomationService aiAutomationService;
 
     public FileEntity getByUuid(String uuid) {
         return fileRepository.findByUuid(uuid)
@@ -118,6 +119,13 @@ public class FileService {
             embeddingJobService.dispatchEmbeddingJob(file);
         } catch (Exception e) {
             log.warn("Failed to dispatch embedding job for file {}: {}", file.getUuid(), e.getMessage());
+        }
+
+        // Dispatch AI automation jobs (tagging, classification, summarization, etc.)
+        try {
+            aiAutomationService.enqueueAIJobs(file.getId(), folder.getWorkspace().getOrganization().getId());
+        } catch (Exception e) {
+            log.warn("Failed to dispatch AI automation jobs for file {}: {}", file.getUuid(), e.getMessage());
         }
 
         // Record activity event

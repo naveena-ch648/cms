@@ -40,6 +40,9 @@ public class Organization {
     @Column(columnDefinition = "JSON")
     private String policies;
 
+    @Column(name = "ai_config", columnDefinition = "JSON")
+    private String aiConfig;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
