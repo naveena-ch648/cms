@@ -26,4 +26,8 @@ public interface ApprovalRequestRepository extends JpaRepository<ApprovalRequest
     Page<ApprovalRequest> findPendingByReviewerId(@Param("reviewerId") Long reviewerId, Pageable pageable);
 
     Page<ApprovalRequest> findBySubmitterIdAndStatus(Long submitterId, ApprovalRequest.Status status, Pageable pageable);
+
+    @Query("SELECT COUNT(ar) FROM ApprovalRequest ar JOIN ApprovalDecision ad ON ad.approvalRequest.id = ar.id " +
+           "WHERE ad.reviewer.id = :reviewerId AND ad.decision = 'PENDING' AND ar.status = 'PENDING'")
+    long countPendingForApprover(@Param("reviewerId") Long reviewerId);
 }

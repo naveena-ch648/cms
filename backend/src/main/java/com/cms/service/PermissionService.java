@@ -27,9 +27,13 @@ public class PermissionService {
 
     public Set<String> getEffectivePermissions(Long userId, Long organizationId) {
         String cacheKey = PERMISSION_CACHE_PREFIX + userId + ":" + organizationId;
-        String cached = redisTemplate.opsForValue().get(cacheKey);
-        if (cached != null) {
-            return Set.of(cached.split(","));
+        try {
+            String cached = redisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                return Set.of(cached.split(","));
+            }
+        } catch (Exception e) {
+            // Redis unavailable — fall through to DB lookup
         }
 
         UserOrganizationRole orgRole = userOrgRoleRepository
@@ -42,8 +46,12 @@ public class PermissionService {
 
         Set<String> permissions = collectRolePermissions(orgRole.getRole());
 
-        String joined = String.join(",", permissions);
-        redisTemplate.opsForValue().set(cacheKey, joined, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
+        try {
+            String joined = String.join(",", permissions);
+            redisTemplate.opsForValue().set(cacheKey, joined, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
+        } catch (Exception e) {
+            // Redis unavailable — skip caching, permissions are still resolved from DB
+        }
 
         return permissions;
     }

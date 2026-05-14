@@ -5,6 +5,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -16,6 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -34,11 +36,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (token != null && jwtProvider.validateToken(token)) {
             String jti = jwtProvider.getTokenId(token);
 
-            // Check Redis blocklist
-            Boolean blocked = redisTemplate.hasKey(BLOCKLIST_PREFIX + jti);
-            if (Boolean.TRUE.equals(blocked)) {
-                filterChain.doFilter(request, response);
-                return;
+            // Check Redis blocklist (skip gracefully if Redis is unavailable)
+            try {
+                Boolean blocked = redisTemplate.hasKey(BLOCKLIST_PREFIX + jti);
+                if (Boolean.TRUE.equals(blocked)) {
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+            } catch (Exception e) {
+                log.warn("Redis unavailable — JWT blocklist check skipped: {}", e.getMessage());
             }
 
             Long userId = jwtProvider.getUserId(token);

@@ -5,6 +5,7 @@ import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -41,28 +42,24 @@ public class LLMConfig {
     }
 
     @Bean
+    @ConditionalOnExpression("!'${llm.openai.api-key:}'.trim().isEmpty()")
     public ChatLanguageModel chatLanguageModel() {
-        if ("openai".equalsIgnoreCase(provider) && !openaiApiKey.isBlank()) {
-            return OpenAiChatModel.builder()
-                    .apiKey(openaiApiKey)
-                    .modelName(openaiModel)
-                    .temperature(temperature)
-                    .maxTokens(maxTokens)
-                    .build();
-        }
-        return null;
+        return OpenAiChatModel.builder()
+                .apiKey(openaiApiKey)
+                .modelName(openaiModel)
+                .temperature(temperature)
+                .maxTokens(maxTokens)
+                .build();
     }
 
     @Bean
+    @ConditionalOnExpression("!'${llm.openai.api-key:}'.trim().isEmpty()")
     public EmbeddingModel embeddingModel() {
-        if ("openai".equalsIgnoreCase(provider) && !openaiApiKey.isBlank()) {
-            return OpenAiEmbeddingModel.builder()
-                    .apiKey(openaiApiKey)
-                    .modelName("text-embedding-3-small")
-                    .dimensions(embeddingDimension)
-                    .build();
-        }
-        return null;
+        return OpenAiEmbeddingModel.builder()
+                .apiKey(openaiApiKey)
+                .modelName("text-embedding-3-small")
+                .dimensions(embeddingDimension)
+                .build();
     }
 
     public String getEmbeddingModelName() {

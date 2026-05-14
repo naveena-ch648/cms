@@ -13,10 +13,15 @@ import com.cms.service.AuthService;
 import com.cms.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 import java.util.Map;
 
@@ -57,6 +62,14 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.ok(Map.of("message", "Successfully signed out")));
     }
 
+    @PostMapping("/two-factor/verify")
+    public ResponseEntity<ApiResponse<TokenResponse>> verifyTwoFactor(
+            @Valid @RequestBody TwoFactorVerifyRequest request, HttpServletRequest httpRequest) {
+        AuthService.AuthResult result = authService.completeTwoFactorLogin(
+                request.getPendingToken(), request.getCode(), httpRequest.getRemoteAddr());
+        return ResponseEntity.ok(ApiResponse.ok(TokenResponse.from(result)));
+    }
+
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<Map<String, Object>>> me(
             @AuthenticationPrincipal UserPrincipal principal) {
@@ -76,5 +89,13 @@ public class AuthController {
                 "organizationRole", orgRole != null ? orgRole.getRole().getName() : "None"
         );
         return ResponseEntity.ok(ApiResponse.ok(profile));
+    }
+
+    @Data
+    public static class TwoFactorVerifyRequest {
+        @NotBlank
+        private String pendingToken;
+        @NotBlank
+        private String code;
     }
 }

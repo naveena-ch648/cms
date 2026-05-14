@@ -70,13 +70,21 @@ public class NotificationService {
     @Transactional(readOnly = true)
     public long getUnreadCount(Long recipientId) {
         String key = UNREAD_COUNT_KEY_PREFIX + recipientId;
-        String cached = redisTemplate.opsForValue().get(key);
-        if (cached != null) {
-            return Long.parseLong(cached);
+        try {
+            String cached = redisTemplate.opsForValue().get(key);
+            if (cached != null) {
+                return Long.parseLong(cached);
+            }
+        } catch (Exception e) {
+            log.warn("Redis unavailable for notification count cache (user {}): {}", recipientId, e.getMessage());
         }
 
         long count = notificationRepository.countByRecipientIdAndIsRead(recipientId, false);
-        redisTemplate.opsForValue().set(key, String.valueOf(count), CACHE_TTL);
+        try {
+            redisTemplate.opsForValue().set(key, String.valueOf(count), CACHE_TTL);
+        } catch (Exception e) {
+            log.warn("Failed to cache notification count for user {}: {}", recipientId, e.getMessage());
+        }
         return count;
     }
 

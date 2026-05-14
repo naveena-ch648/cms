@@ -1,12 +1,14 @@
-import { useState, FormEvent } from "react";
-import { useAuth } from "../contexts/AuthContext";
-import { useNavigate } from "react-router-dom";
+import { useState, FormEvent } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import TwoFactorVerifyPage from './TwoFactorVerifyPage';
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pendingTwoFactor, setPendingTwoFactor] = useState<{ pendingToken: string; method: 'TOTP' | 'EMAIL' } | null>(null);
   const { login } = useAuth();
   const navigate = useNavigate();
 
@@ -18,7 +20,13 @@ export default function LoginPage() {
       await login(email, password);
       navigate("/");
     } catch (err: any) {
-      setError(err.response?.data?.error?.message || "Login failed");
+      // HTTP 202 means 2FA is required
+      if (err.response?.status === 202 && err.response?.data?.data?.requiresTwoFactor === 'true') {
+        const { pendingToken, method } = err.response.data.data;
+        setPendingTwoFactor({ pendingToken, method: method as 'TOTP' | 'EMAIL' });
+      } else {
+        setError(err.response?.data?.error?.message || 'Login failed');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -69,6 +77,16 @@ export default function LoginPage() {
     borderRadius: 6,
     cursor: "pointer",
   };
+
+  if (pendingTwoFactor) {
+    return (
+      <TwoFactorVerifyPage
+        pendingToken={pendingTwoFactor.pendingToken}
+        method={pendingTwoFactor.method}
+        onCancel={() => setPendingTwoFactor(null)}
+      />
+    );
+  }
 
   return (
     <div style={pageStyle}>

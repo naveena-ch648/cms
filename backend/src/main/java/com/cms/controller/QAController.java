@@ -21,10 +21,12 @@ import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import org.springframework.lang.Nullable;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.lang.Nullable;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -49,7 +51,7 @@ public class QAController {
                         EmbeddingJobService embeddingJobService,
                         WorkspaceRepository workspaceRepository,
                         FileService fileService,
-                        @Nullable EmbeddingModel embeddingModel,
+                        @Autowired(required = false) @Nullable EmbeddingModel embeddingModel,
                         ObjectMapper objectMapper,
                         RateLimiter rateLimiter) {
         this.qaService = qaService;

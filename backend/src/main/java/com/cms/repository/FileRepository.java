@@ -11,6 +11,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Repository
@@ -39,4 +40,11 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
     Page<FileEntity> findByWorkspaceIdInAndStatusOrderByLastAccessedAtDesc(List<Long> workspaceIds, FileStatus status, Pageable pageable);
 
     long countByOrganizationIdAndStatusNot(Long organizationId, FileStatus status);
+
+    @Query("SELECT new map(f.name as name, f.workspace.name as workspaceName, f.updatedAt as updatedAt) " +
+           "FROM FileEntity f WHERE f.workspace.id IN :workspaceIds AND f.status = 'ACTIVE' " +
+           "AND f.updatedAt >= :since ORDER BY f.updatedAt DESC")
+    List<Map<String, Object>> findRecentlyModifiedSummary(
+            @Param("workspaceIds") List<Long> workspaceIds,
+            @Param("since") Instant since);
 }

@@ -12,6 +12,8 @@ import com.cms.repository.ConversationMessageRepository;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import org.springframework.lang.Nullable;
 import io.qdrant.client.grpc.Points.ScoredPoint;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,7 +40,7 @@ public class QAService {
     public QAService(VectorSearchService vectorSearchService,
                      ConversationService conversationService,
                      ConversationMessageRepository messageRepository,
-                     @Nullable ChatLanguageModel chatLanguageModel) {
+                     @Autowired(required = false) @Nullable ChatLanguageModel chatLanguageModel) {
         this.vectorSearchService = vectorSearchService;
         this.conversationService = conversationService;
         this.messageRepository = messageRepository;

@@ -39,7 +39,10 @@ export const webhooksApi = {
     apiClient.post<{ data: Webhook }>(`${BASE}`, data).then(r => r.data.data),
 
   list: (params?: { status?: string; page?: number; size?: number }) =>
-    apiClient.get<{ data: Webhook[] }>(`${BASE}`, { params }).then(r => r.data.data),
+    apiClient.get<{ data: { content: Webhook[] } | Webhook[] }>(`${BASE}`, { params }).then(r => {
+      const d = r.data.data;
+      return Array.isArray(d) ? d : (d as { content: Webhook[] }).content ?? [];
+    }),
 
   get: (webhookId: string) =>
     apiClient.get<{ data: Webhook }>(`${BASE}/${webhookId}`).then(r => r.data.data),

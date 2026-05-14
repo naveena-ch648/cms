@@ -44,6 +44,16 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ex.getCode(), ex.getMessage()));
     }
 
+    @ExceptionHandler(TwoFactorRequiredException.class)
+    public ResponseEntity<ApiResponse<java.util.Map<String, String>>> handleTwoFactor(TwoFactorRequiredException ex) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(ApiResponse.ok(java.util.Map.of(
+                        "requiresTwoFactor", "true",
+                        "pendingToken", ex.getPendingToken(),
+                        "method", ex.getMethod()
+                )));
+    }
+
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
