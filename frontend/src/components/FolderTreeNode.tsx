@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import FolderContextMenu from './FolderContextMenu';
+import { useState, useRef } from "react";
+import FolderContextMenu from "./FolderContextMenu";
 
 interface TreeNode {
   id: string;
@@ -30,6 +30,7 @@ interface FolderTreeNodeProps {
   onDiscuss?: (folderId: string) => void;
   isFavorite: boolean;
   favoriteFolderIds?: Set<string>;
+  readOnly?: boolean;
 }
 
 export default function FolderTreeNode({
@@ -50,9 +51,13 @@ export default function FolderTreeNode({
   onDiscuss,
   isFavorite,
   favoriteFolderIds,
+  readOnly = false,
 }: FolderTreeNodeProps) {
   const [dropTarget, setDropTarget] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const nodeRef = useRef<HTMLDivElement>(null);
 
   const isExpanded = expandedIds.has(node.id);
@@ -62,12 +67,14 @@ export default function FolderTreeNode({
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
+    // Viewers have no write actions — skip context menu
+    if (readOnly) return;
     setContextMenu({ x: e.clientX, y: e.clientY });
   };
 
   const handleDragStart = (e: React.DragEvent) => {
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', node.id);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", node.id);
     onDragStart(node.id);
   };
 
@@ -106,7 +113,9 @@ export default function FolderTreeNode({
       const touch = e.changedTouches[0];
       if (touch) {
         const element = document.elementFromPoint(touch.clientX, touch.clientY);
-        const targetId = element?.closest('[data-folder-id]')?.getAttribute('data-folder-id');
+        const targetId = element
+          ?.closest("[data-folder-id]")
+          ?.getAttribute("data-folder-id");
         if (targetId && targetId !== dragSourceId) {
           onDrop(targetId);
         }
@@ -130,15 +139,19 @@ export default function FolderTreeNode({
         onContextMenu={handleContextMenu}
         onClick={() => onSelect(node.id)}
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          padding: '4px 8px',
+          display: "flex",
+          alignItems: "center",
+          padding: "4px 8px",
           paddingLeft: depth * 20 + 8,
-          cursor: 'pointer',
-          backgroundColor: isSelected ? '#e3f2fd' : dropTarget ? '#f0f4c3' : 'transparent',
+          cursor: "pointer",
+          backgroundColor: isSelected
+            ? "#e3f2fd"
+            : dropTarget
+              ? "#f0f4c3"
+              : "transparent",
           opacity: isDragSource ? 0.5 : 1,
-          borderBottom: '1px solid #f0f0f0',
-          userSelect: 'none',
+          borderBottom: "1px solid #f0f0f0",
+          userSelect: "none",
         }}
       >
         {hasChildren ? (
@@ -147,9 +160,15 @@ export default function FolderTreeNode({
               e.stopPropagation();
               onToggleExpand(node.id);
             }}
-            style={{ marginRight: 4, cursor: 'pointer', fontSize: 12, width: 16, textAlign: 'center' }}
+            style={{
+              marginRight: 4,
+              cursor: "pointer",
+              fontSize: 12,
+              width: 16,
+              textAlign: "center",
+            }}
           >
-            {isExpanded ? '▼' : '▶'}
+            {isExpanded ? "▼" : "▶"}
           </span>
         ) : (
           <span style={{ marginRight: 4, width: 16 }} />
@@ -157,7 +176,14 @@ export default function FolderTreeNode({
 
         <span style={{ marginRight: 6 }}>📁</span>
 
-        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
           {node.name}
         </span>
 
@@ -167,15 +193,15 @@ export default function FolderTreeNode({
               e.stopPropagation();
               onToggleFavorite(node.id, isFavorite);
             }}
-            style={{ cursor: 'pointer', marginLeft: 4, fontSize: 14 }}
-            title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+            style={{ cursor: "pointer", marginLeft: 4, fontSize: 14 }}
+            title={isFavorite ? "Remove from favorites" : "Add to favorites"}
           >
-            {isFavorite ? '⭐' : '☆'}
+            {isFavorite ? "⭐" : "☆"}
           </span>
         )}
 
         {node.childCount > 0 && !isExpanded && (
-          <span style={{ marginLeft: 4, fontSize: 11, color: '#999' }}>
+          <span style={{ marginLeft: 4, fontSize: 11, color: "#999" }}>
             ({node.childCount})
           </span>
         )}
@@ -198,35 +224,41 @@ export default function FolderTreeNode({
             setContextMenu(null);
             onDeleteFolder(node.id);
           }}
-          onDiscuss={onDiscuss ? () => {
-            setContextMenu(null);
-            onDiscuss(node.id);
-          } : undefined}
+          onDiscuss={
+            onDiscuss
+              ? () => {
+                  setContextMenu(null);
+                  onDiscuss(node.id);
+                }
+              : undefined
+          }
         />
       )}
 
-      {isExpanded && node.children.map(child => (
-        <FolderTreeNode
-          key={child.id}
-          node={child}
-          depth={depth + 1}
-          selectedFolderId={selectedFolderId}
-          expandedIds={expandedIds}
-          dragSourceId={dragSourceId}
-          onSelect={onSelect}
-          onToggleExpand={onToggleExpand}
-          onCreateFolder={onCreateFolder}
-          onRenameFolder={onRenameFolder}
-          onDeleteFolder={onDeleteFolder}
-          onDragStart={onDragStart}
-          onDrop={onDrop}
-          onDragEnd={onDragEnd}
-          onToggleFavorite={onToggleFavorite}
-          onDiscuss={onDiscuss}
-          isFavorite={favoriteFolderIds?.has(child.id) ?? false}
-          favoriteFolderIds={favoriteFolderIds}
-        />
-      ))}
+      {isExpanded &&
+        node.children.map((child) => (
+          <FolderTreeNode
+            key={child.id}
+            node={child}
+            depth={depth + 1}
+            selectedFolderId={selectedFolderId}
+            expandedIds={expandedIds}
+            dragSourceId={dragSourceId}
+            onSelect={onSelect}
+            onToggleExpand={onToggleExpand}
+            onCreateFolder={onCreateFolder}
+            onRenameFolder={onRenameFolder}
+            onDeleteFolder={onDeleteFolder}
+            onDragStart={onDragStart}
+            onDrop={onDrop}
+            onDragEnd={onDragEnd}
+            onToggleFavorite={onToggleFavorite}
+            onDiscuss={onDiscuss}
+            readOnly={readOnly}
+            isFavorite={favoriteFolderIds?.has(child.id) ?? false}
+            favoriteFolderIds={favoriteFolderIds}
+          />
+        ))}
     </div>
   );
 }

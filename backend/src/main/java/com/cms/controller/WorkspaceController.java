@@ -4,9 +4,11 @@ import com.cms.dto.ApiResponse;
 import com.cms.dto.workspace.*;
 import com.cms.entity.FolderFavorite;
 import com.cms.entity.FolderRecent;
+import com.cms.entity.Role;
 import com.cms.entity.UserWorkspaceRole;
 import com.cms.entity.Workspace;
 import com.cms.middleware.TenantContext;
+import com.cms.repository.UserWorkspaceRoleRepository;
 import com.cms.security.UserPrincipal;
 import com.cms.service.FolderService;
 import com.cms.service.WorkspaceService;
@@ -29,9 +31,10 @@ public class WorkspaceController {
 
     private final WorkspaceService workspaceService;
     private final FolderService folderService;
+    private final UserWorkspaceRoleRepository userWorkspaceRoleRepository;
 
-    @PostMapping
-    @PreAuthorize("hasPermission(null, 'manage-workspaces')")
+        @PostMapping
+        @PreAuthorize("hasPermission(null, 'manage-workspace')")
     public ResponseEntity<ApiResponse<WorkspaceResponse>> create(
             @Valid @RequestBody CreateWorkspaceRequest request,
             @AuthenticationPrincipal UserPrincipal principal) {
@@ -43,11 +46,20 @@ public class WorkspaceController {
     }
 
     @GetMapping
-    public ResponseEntity<ApiResponse<List<WorkspaceResponse>>> list(Pageable pageable) {
+    public ResponseEntity<ApiResponse<List<WorkspaceResponse>>> list(
+            Pageable pageable,
+            @AuthenticationPrincipal UserPrincipal principal) {
         Long orgId = TenantContext.getCurrentTenant();
         Page<Workspace> page = workspaceService.list(orgId, pageable);
         List<WorkspaceResponse> workspaces = page.getContent().stream()
-                .map(WorkspaceResponse::from).toList();
+                .map(ws -> {
+                    int count = (int) userWorkspaceRoleRepository.countByWorkspaceId(ws.getId());
+                    Role myRole = userWorkspaceRoleRepository
+                            .findByUserIdAndWorkspaceId(principal.getId(), ws.getId())
+                            .map(UserWorkspaceRole::getRole)
+                            .orElse(null);
+                    return WorkspaceResponse.from(ws, count, myRole);
+                }).toList();
         ApiResponse.PagedMeta meta = ApiResponse.PagedMeta.builder()
                 .page(page.getNumber())
                 .size(page.getSize())
@@ -58,13 +70,20 @@ public class WorkspaceController {
     }
 
     @GetMapping("/{workspaceId}")
-    public ResponseEntity<ApiResponse<WorkspaceResponse>> getById(@PathVariable String workspaceId) {
+    public ResponseEntity<ApiResponse<WorkspaceResponse>> getById(
+            @PathVariable String workspaceId,
+            @AuthenticationPrincipal UserPrincipal principal) {
         Workspace workspace = workspaceService.getById(workspaceId);
-        return ResponseEntity.ok(ApiResponse.ok(WorkspaceResponse.from(workspace)));
+        int count = (int) userWorkspaceRoleRepository.countByWorkspaceId(workspace.getId());
+        Role myRole = userWorkspaceRoleRepository
+                .findByUserIdAndWorkspaceId(principal.getId(), workspace.getId())
+                .map(UserWorkspaceRole::getRole)
+                .orElse(null);
+        return ResponseEntity.ok(ApiResponse.ok(WorkspaceResponse.from(workspace, count, myRole)));
     }
 
-    @PutMapping("/{workspaceId}")
-    @PreAuthorize("hasPermission(null, 'manage-workspaces')")
+        @PutMapping("/{workspaceId}")
+        @PreAuthorize("hasPermission(null, 'manage-workspace')")
     public ResponseEntity<ApiResponse<WorkspaceResponse>> update(
             @PathVariable String workspaceId, @Valid @RequestBody UpdateWorkspaceRequest request) {
         Workspace workspace = workspaceService.update(
@@ -72,22 +91,22 @@ public class WorkspaceController {
         return ResponseEntity.ok(ApiResponse.ok(WorkspaceResponse.from(workspace)));
     }
 
-    @PutMapping("/{workspaceId}/archive")
-    @PreAuthorize("hasPermission(null, 'manage-workspaces')")
+        @PutMapping("/{workspaceId}/archive")
+        @PreAuthorize("hasPermission(null, 'manage-workspace')")
     public ResponseEntity<ApiResponse<WorkspaceResponse>> archive(@PathVariable String workspaceId) {
         Workspace workspace = workspaceService.archive(workspaceId);
         return ResponseEntity.ok(ApiResponse.ok(WorkspaceResponse.from(workspace)));
     }
 
-    @DeleteMapping("/{workspaceId}")
-    @PreAuthorize("hasPermission(null, 'manage-workspaces')")
+        @DeleteMapping("/{workspaceId}")
+        @PreAuthorize("hasPermission(null, 'manage-workspace')")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable String workspaceId) {
         workspaceService.delete(workspaceId);
         return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
-    @PostMapping("/{workspaceId}/members")
-    @PreAuthorize("hasPermission(null, 'manage-workspaces')")
+        @PostMapping("/{workspaceId}/members")
+        @PreAuthorize("hasPermission(null, 'manage-workspace')")
     public ResponseEntity<ApiResponse<Void>> assignMember(
             @PathVariable String workspaceId,
             @Valid @RequestBody AssignWorkspaceRoleRequest request) {
@@ -95,8 +114,8 @@ public class WorkspaceController {
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(null));
     }
 
-    @DeleteMapping("/{workspaceId}/members/{userId}")
-    @PreAuthorize("hasPermission(null, 'manage-workspaces')")
+        @DeleteMapping("/{workspaceId}/members/{userId}")
+        @PreAuthorize("hasPermission(null, 'manage-workspace')")
     public ResponseEntity<ApiResponse<Void>> removeMember(
             @PathVariable String workspaceId, @PathVariable Long userId) {
         workspaceService.removeUserRole(workspaceId, userId);

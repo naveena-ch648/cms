@@ -1,4 +1,4 @@
-# Feature Specification: Multi-Tenant Foundation
+f# Feature Specification: Multi-Tenant Foundation
 
 **Feature Branch**: `001-multi-tenant-foundation`  
 **Created**: 2026-05-05  

@@ -19,6 +19,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import org.springframework.lang.Nullable;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -48,7 +49,7 @@ public class QAController {
                         EmbeddingJobService embeddingJobService,
                         WorkspaceRepository workspaceRepository,
                         FileService fileService,
-                        EmbeddingModel embeddingModel,
+                        @Nullable EmbeddingModel embeddingModel,
                         ObjectMapper objectMapper,
                         RateLimiter rateLimiter) {
         this.qaService = qaService;

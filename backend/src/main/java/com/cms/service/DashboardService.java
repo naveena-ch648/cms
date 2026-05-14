@@ -2,7 +2,6 @@ package com.cms.service;
 
 import com.cms.dto.dashboard.*;
 import com.cms.entity.FileEntity;
-import com.cms.entity.SharedLink;
 import com.cms.entity.StorageQuota;
 import com.cms.entity.User;
 import com.cms.repository.*;
@@ -37,6 +36,7 @@ public class DashboardService {
     private final SharedLinkRepository sharedLinkRepository;
     private final ApprovalRequestRepository approvalRequestRepository;
     private final StringRedisTemplate redisTemplate;
+    private final RecentFileService recentFileService;
 
     @Transactional(readOnly = true)
     public DashboardSummaryDto getSummary(Long userId, Long organizationId) {
@@ -81,15 +81,7 @@ public class DashboardService {
 
     @Transactional(readOnly = true)
     public List<RecentFileDto> getRecentFiles(Long userId, int limit) {
-        List<Long> workspaceIds = getUserWorkspaceIds(userId);
-        if (workspaceIds.isEmpty()) {
-            return Collections.emptyList();
-        }
-        Page<FileEntity> recentFiles = fileRepository.findByWorkspaceIdInAndStatusOrderByLastAccessedAtDesc(
-                workspaceIds, FileEntity.FileStatus.ACTIVE, PageRequest.of(0, limit));
-        return recentFiles.getContent().stream()
-                .map(RecentFileDto::from)
-                .collect(Collectors.toList());
+        return recentFileService.getRecentFiles(userId, limit);
     }
 
     @Transactional(readOnly = true)
@@ -108,32 +100,19 @@ public class DashboardService {
             return Collections.emptyList();
         }
 
+        Pageable page = PageRequest.of(0, limit, org.springframework.data.domain.Sort.by("createdAt").descending());
+
         if ("BY_ME".equalsIgnoreCase(direction)) {
-            return workspaceIds.stream()
-                    .flatMap(wsId -> sharedLinkRepository.findByCreatedByIdAndWorkspaceIdAndStatus(
-                            userId, wsId, SharedLink.LinkStatus.ACTIVE, PageRequest.of(0, limit)).getContent().stream())
-                    .limit(limit)
+            return sharedLinkRepository.findByMeInWorkspaces(userId, workspaceIds, page)
+                    .stream()
                     .map(SharedItemDto::fromSharedByMe)
                     .collect(Collectors.toList());
         }
 
-        // Default: shared with me — using active links in user's workspaces
-        return workspaceIds.stream()
-                .flatMap(wsId -> sharedLinkRepository.findByWorkspaceIdAndStatus(
-                        wsId, SharedLink.LinkStatus.ACTIVE, PageRequest.of(0, limit)).getContent().stream())
-                .filter(link -> link.getCreatedBy() == null || !link.getCreatedBy().getId().equals(userId))
-                .limit(limit)
-                .map(link -> SharedItemDto.builder()
-                        .id(link.getUuid())
-                        .fileName(link.getFile() != null ? link.getFile().getName() : null)
-                        .fileId(link.getFile() != null ? link.getFile().getUuid() : null)
-                        .sharedBy(link.getCreatedBy() != null
-                                ? link.getCreatedBy().getFirstName() + " " + link.getCreatedBy().getLastName() : null)
-                        .sharedWith("Me")
-                        .sharedAt(link.getCreatedAt())
-                        .expiresAt(link.getExpiresAt())
-                        .type("SHARED_WITH_ME")
-                        .build())
+        // WITH_ME: links created by others in the user's workspaces
+        return sharedLinkRepository.findByOthersInWorkspaces(userId, workspaceIds, page)
+                .stream()
+                .map(SharedItemDto::fromSharedWithMe)
                 .collect(Collectors.toList());
     }
 

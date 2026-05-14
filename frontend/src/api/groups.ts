@@ -1,6 +1,6 @@
 import apiClient from './client';
 import type { ApiResponse } from '../types/api';
-import type { Group } from '../types/models';
+import type { Group, User } from '../types/models';
 
 export const groupsApi = {
   list: (params?: { page?: number; size?: number }) =>
@@ -18,9 +18,12 @@ export const groupsApi = {
   delete: (groupId: string) =>
     apiClient.delete<ApiResponse<void>>(`/groups/${groupId}`),
 
-  addMember: (groupId: string, userId: number) =>
+  getMembers: (groupId: string) =>
+    apiClient.get<ApiResponse<User[]>>(`/groups/${groupId}/members`),
+
+  addMember: (groupId: string, userId: string) =>
     apiClient.post<ApiResponse<void>>(`/groups/${groupId}/members`, { userId }),
 
-  removeMember: (groupId: string, userId: number) =>
+  removeMember: (groupId: string, userId: string) =>
     apiClient.delete<ApiResponse<void>>(`/groups/${groupId}/members/${userId}`),
 };

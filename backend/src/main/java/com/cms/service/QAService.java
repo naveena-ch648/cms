@@ -10,6 +10,7 @@ import com.cms.entity.ConversationMessage;
 import com.cms.entity.ConversationMessage.Role;
 import com.cms.repository.ConversationMessageRepository;
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import org.springframework.lang.Nullable;
 import io.qdrant.client.grpc.Points.ScoredPoint;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,7 +38,7 @@ public class QAService {
     public QAService(VectorSearchService vectorSearchService,
                      ConversationService conversationService,
                      ConversationMessageRepository messageRepository,
-                     ChatLanguageModel chatLanguageModel) {
+                     @Nullable ChatLanguageModel chatLanguageModel) {
         this.vectorSearchService = vectorSearchService;
         this.conversationService = conversationService;
         this.messageRepository = messageRepository;

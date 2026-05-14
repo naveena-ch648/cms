@@ -81,9 +81,9 @@ CREATE TABLE sync_links (
     last_error VARCHAR(1000) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NULL ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_sl_organization FOREIGN KEY (organization_id) REFERENCES organizations(id),
-    CONSTRAINT fk_sl_connection FOREIGN KEY (connection_id) REFERENCES integration_connections(id),
-    CONSTRAINT fk_sl_folder FOREIGN KEY (folder_id) REFERENCES folders(id),
+    CONSTRAINT fk_synl_organization FOREIGN KEY (organization_id) REFERENCES organizations(id),
+    CONSTRAINT fk_synl_connection FOREIGN KEY (connection_id) REFERENCES integration_connections(id),
+    CONSTRAINT fk_synl_folder FOREIGN KEY (folder_id) REFERENCES folders(id),
     CONSTRAINT uq_sl_folder UNIQUE (folder_id)
 );
 

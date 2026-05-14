@@ -1,6 +1,6 @@
 package com.cms.dto.group;
 
-import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotBlank;
 import lombok.*;
 
 @Getter
@@ -10,6 +10,6 @@ import lombok.*;
 @Builder
 public class AddGroupMemberRequest {
 
-    @NotNull(message = "User ID is required")
-    private Long userId;
+    @NotBlank(message = "User ID is required")
+    private String userId;
 }

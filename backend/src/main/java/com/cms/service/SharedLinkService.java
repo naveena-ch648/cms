@@ -33,6 +33,7 @@ public class SharedLinkService {
     private final FolderRepository folderRepository;
     private final UserRepository userRepository;
     private final WorkspaceRepository workspaceRepository;
+    private final UserWorkspaceRoleRepository userWorkspaceRoleRepository;
     private final PermissionFilterService permissionFilterService;
     private final StorageService storageService;
     private final AuditService auditService;
@@ -71,7 +72,8 @@ public class SharedLinkService {
             }
             file = fileRepository.findByUuid(request.getFileUuid())
                     .orElseThrow(() -> new ResourceNotFoundException("File not found"));
-            if (!permissionFilterService.hasEditorAccess(userId, file.getFolder())) {
+            if (!permissionFilterService.hasEditorAccess(userId, file.getFolder())
+                    && !hasWorkspaceEditorOrAdmin(userId, workspace.getId())) {
                 throw new BusinessRuleException("INSUFFICIENT_PERMISSION", "Editor access required to create share links");
             }
         } else {
@@ -80,7 +82,8 @@ public class SharedLinkService {
             }
             folder = folderRepository.findByUuid(request.getFolderUuid())
                     .orElseThrow(() -> new ResourceNotFoundException("Folder not found"));
-            if (!permissionFilterService.hasEditorAccess(userId, folder)) {
+            if (!permissionFilterService.hasEditorAccess(userId, folder)
+                    && !hasWorkspaceEditorOrAdmin(userId, workspace.getId())) {
                 throw new BusinessRuleException("INSUFFICIENT_PERMISSION", "Editor access required to create share links");
             }
         }
@@ -289,6 +292,15 @@ public class SharedLinkService {
         if (link.getMaxViews() != null && link.getViewCount() >= link.getMaxViews()) {
             throw new BusinessRuleException("MAX_VIEWS_REACHED", "This share link has reached its maximum view count");
         }
+    }
+
+    private boolean hasWorkspaceEditorOrAdmin(Long userId, Long workspaceId) {
+        return userWorkspaceRoleRepository.findByUserIdAndWorkspaceId(userId, workspaceId)
+                .map(uwr -> {
+                    String roleName = uwr.getRole().getName();
+                    return "Admin".equalsIgnoreCase(roleName) || "Editor".equalsIgnoreCase(roleName);
+                })
+                .orElse(false);
     }
 
     private String generateToken() {

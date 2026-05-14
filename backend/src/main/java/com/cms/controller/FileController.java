@@ -16,6 +16,7 @@ import com.cms.repository.FolderRepository;
 import com.cms.repository.UserRepository;
 import com.cms.security.UserPrincipal;
 import com.cms.service.FileService;
+import com.cms.service.RecentFileService;
 import com.cms.service.SearchService;
 import com.cms.service.StorageQuotaService;
 import com.cms.service.StorageService;
@@ -46,6 +47,7 @@ public class FileController {
     private final StorageService storageService;
     private final StorageQuotaService storageQuotaService;
     private final SearchService searchService;
+    private final RecentFileService recentFileService;
 
     @GetMapping
     public ResponseEntity<ApiResponse<Page<FileDto>>> listFiles(
@@ -72,9 +74,23 @@ public class FileController {
     }
 
     @GetMapping("/{fileId}")
-    public ResponseEntity<ApiResponse<FileDto>> getFile(@PathVariable String fileId) {
+    public ResponseEntity<ApiResponse<FileDto>> getFile(
+            @PathVariable String fileId,
+            @AuthenticationPrincipal UserPrincipal principal) {
         FileEntity file = fileService.getByUuid(fileId);
+        // Record this access in the user's personal recent-files history
+        recentFileService.recordAccess(principal.getId(), file.getId());
         return ResponseEntity.ok(ApiResponse.ok(FileDto.from(file)));
+    }
+
+    /** Lightweight endpoint to track a file view without fetching the full response. */
+    @PostMapping("/{fileId}/view")
+    public ResponseEntity<ApiResponse<Void>> recordView(
+            @PathVariable String fileId,
+            @AuthenticationPrincipal UserPrincipal principal) {
+        FileEntity file = fileService.getByUuid(fileId);
+        recentFileService.recordAccess(principal.getId(), file.getId());
+        return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
     @GetMapping("/{fileId}/download")

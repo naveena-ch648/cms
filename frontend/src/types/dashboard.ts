@@ -22,16 +22,16 @@ export interface RecentFile {
 }
 
 export type ActivityActionType =
-  | 'FILE_UPLOADED'
-  | 'FILE_DOWNLOADED'
-  | 'FILE_SHARED'
-  | 'FILE_MOVED'
-  | 'FILE_DELETED'
-  | 'FOLDER_CREATED'
-  | 'COMMENT_ADDED'
-  | 'APPROVAL_SUBMITTED'
-  | 'APPROVAL_DECIDED'
-  | 'WORKFLOW_TRANSITIONED';
+  | "FILE_UPLOADED"
+  | "FILE_DOWNLOADED"
+  | "FILE_SHARED"
+  | "FILE_MOVED"
+  | "FILE_DELETED"
+  | "FOLDER_CREATED"
+  | "COMMENT_ADDED"
+  | "APPROVAL_SUBMITTED"
+  | "APPROVAL_DECIDED"
+  | "WORKFLOW_TRANSITIONED";
 
 export interface ActivityEvent {
   id: string;
@@ -49,21 +49,22 @@ export interface SharedItem {
   id: string;
   fileName: string;
   fileId: string;
+  workspaceName: string;
   sharedBy: string;
   sharedWith: string;
   sharedAt: string;
   expiresAt: string | null;
-  type: 'SHARED_BY_ME' | 'SHARED_WITH_ME';
+  type: "SHARED_BY_ME" | "SHARED_WITH_ME";
 }
 
 export type AlertType =
-  | 'STORAGE_WARNING'
-  | 'STORAGE_CRITICAL'
-  | 'LINK_EXPIRING'
-  | 'UPLOAD_FAILED'
-  | 'SYSTEM_ANNOUNCEMENT';
+  | "STORAGE_WARNING"
+  | "STORAGE_CRITICAL"
+  | "LINK_EXPIRING"
+  | "UPLOAD_FAILED"
+  | "SYSTEM_ANNOUNCEMENT";
 
-export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
+export type AlertSeverity = "INFO" | "WARNING" | "CRITICAL";
 
 export interface Alert {
   id: string;

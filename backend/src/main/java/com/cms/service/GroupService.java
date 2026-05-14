@@ -1,11 +1,13 @@
 package com.cms.service;
 
 import com.cms.entity.Group;
+import com.cms.entity.User;
 import com.cms.entity.UserGroup;
 import com.cms.exception.DuplicateResourceException;
 import com.cms.exception.ResourceNotFoundException;
 import com.cms.repository.GroupRepository;
 import com.cms.repository.UserGroupRepository;
+import com.cms.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -21,6 +23,7 @@ public class GroupService {
     private final GroupRepository groupRepository;
     private final UserGroupRepository userGroupRepository;
     private final OrganizationService organizationService;
+    private final UserRepository userRepository;
 
     @Transactional
     public Group create(Long organizationId, String name, String description) {
@@ -61,25 +64,40 @@ public class GroupService {
     }
 
     @Transactional
-    public void addMember(String groupUuid, Long userId) {
+    public void addMember(String groupUuid, String userUuid) {
         Group group = getById(groupUuid);
-        if (userGroupRepository.existsByUserIdAndGroupId(userId, group.getId())) {
+        User user = userRepository.findByUuid(userUuid)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        if (userGroupRepository.existsByUserIdAndGroupId(user.getId(), group.getId())) {
             throw new DuplicateResourceException("USER_IN_GROUP", "User is already a member of this group");
         }
         UserGroup userGroup = UserGroup.builder()
-                .userId(userId)
+                .userId(user.getId())
                 .groupId(group.getId())
                 .build();
         userGroupRepository.save(userGroup);
     }
 
     @Transactional
-    public void removeMember(String groupUuid, Long userId) {
+    public void removeMember(String groupUuid, String userUuid) {
         Group group = getById(groupUuid);
-        userGroupRepository.deleteByUserIdAndGroupId(userId, group.getId());
+        User user = userRepository.findByUuid(userUuid)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        userGroupRepository.deleteByUserIdAndGroupId(user.getId(), group.getId());
     }
 
     public List<UserGroup> getMembers(Long groupId) {
         return userGroupRepository.findByGroupId(groupId);
+    }
+
+    public List<User> getUsersInGroup(String groupUuid) {
+        Group group = getById(groupUuid);
+        List<UserGroup> memberships = userGroupRepository.findByGroupId(group.getId());
+        List<Long> userIds = memberships.stream().map(UserGroup::getUserId).toList();
+        return userRepository.findAllById(userIds);
+    }
+
+    public long countMembers(Long groupId) {
+        return userGroupRepository.countByGroupId(groupId);
     }
 }

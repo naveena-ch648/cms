@@ -35,11 +35,12 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/auth/login", "/api/v1/auth/refresh").permitAll()
-                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers(HttpMethod.PUT, "/api/v1/audit/events/**").denyAll()
-                        .requestMatchers(HttpMethod.DELETE, "/api/v1/audit/events/**").denyAll()
-                        .anyRequest().authenticated()
+                    .requestMatchers("/api/v1/auth/login", "/api/v1/auth/refresh").permitAll()
+                    .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs.yaml").permitAll()
+                    .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                    .requestMatchers(HttpMethod.PUT, "/api/v1/audit/events/**").denyAll()
+                    .requestMatchers(HttpMethod.DELETE, "/api/v1/audit/events/**").denyAll()
+                    .anyRequest().authenticated()
                 )
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint((request, response, authException) ->

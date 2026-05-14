@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react';
-import type { FolderTreeNode as FolderTreeNodeType } from '../types/folder';
-import FolderTreeNodeComponent from './FolderTreeNode';
+import { useState, useCallback } from "react";
+import type { FolderTreeNode as FolderTreeNodeType } from "../types/folder";
+import FolderTreeNodeComponent from "./FolderTreeNode";
 
 interface FolderTreeProps {
   folders: FolderTreeNodeType[];
@@ -15,6 +15,7 @@ interface FolderTreeProps {
   favoriteFolderIds?: Set<string>;
   loading?: boolean;
   error?: string | null;
+  readOnly?: boolean;
 }
 
 interface TreeNode extends FolderTreeNodeType {
@@ -44,18 +45,22 @@ function buildTree(folders: FolderTreeNodeType[]): TreeNode[] {
   // Sort children by sortOrder
   const sortChildren = (nodes: TreeNode[]) => {
     nodes.sort((a, b) => a.sortOrder - b.sortOrder);
-    nodes.forEach(n => sortChildren(n.children));
+    nodes.forEach((n) => sortChildren(n.children));
   };
   sortChildren(roots);
 
   return roots;
 }
 
-function isDescendant(folders: FolderTreeNodeType[], folderId: string, potentialAncestorId: string): boolean {
-  let current = folders.find(f => f.id === folderId);
+function isDescendant(
+  folders: FolderTreeNodeType[],
+  folderId: string,
+  potentialAncestorId: string,
+): boolean {
+  let current = folders.find((f) => f.id === folderId);
   while (current && current.parentId) {
     if (current.parentId === potentialAncestorId) return true;
-    current = folders.find(f => f.id === current!.parentId);
+    current = folders.find((f) => f.id === current!.parentId);
   }
   return false;
 }
@@ -73,6 +78,7 @@ export default function FolderTree({
   favoriteFolderIds,
   loading,
   error,
+  readOnly = false,
 }: FolderTreeProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [dragSourceId, setDragSourceId] = useState<string | null>(null);
@@ -80,7 +86,7 @@ export default function FolderTree({
   const tree = buildTree(folders);
 
   const toggleExpand = useCallback((id: string) => {
-    setExpandedIds(prev => {
+    setExpandedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -92,49 +98,58 @@ export default function FolderTree({
     setDragSourceId(folderId);
   }, []);
 
-  const handleDrop = useCallback((targetParentId: string | null) => {
-    if (!dragSourceId || dragSourceId === targetParentId) {
+  const handleDrop = useCallback(
+    (targetParentId: string | null) => {
+      if (!dragSourceId || dragSourceId === targetParentId) {
+        setDragSourceId(null);
+        return;
+      }
+      // Client-side circular validation
+      if (
+        targetParentId &&
+        (dragSourceId === targetParentId ||
+          isDescendant(folders, targetParentId, dragSourceId))
+      ) {
+        setDragSourceId(null);
+        return;
+      }
+      onMoveFolder(dragSourceId, targetParentId);
       setDragSourceId(null);
-      return;
-    }
-    // Client-side circular validation
-    if (targetParentId && (dragSourceId === targetParentId || isDescendant(folders, targetParentId, dragSourceId))) {
-      setDragSourceId(null);
-      return;
-    }
-    onMoveFolder(dragSourceId, targetParentId);
-    setDragSourceId(null);
-  }, [dragSourceId, folders, onMoveFolder]);
+    },
+    [dragSourceId, folders, onMoveFolder],
+  );
 
   const handleDragEnd = useCallback(() => {
     setDragSourceId(null);
   }, []);
 
   if (loading) {
-    return <div style={{ padding: 16, color: '#888' }}>Loading folders...</div>;
+    return <div style={{ padding: 16, color: "#888" }}>Loading folders...</div>;
   }
 
   if (error) {
-    return <div style={{ padding: 16, color: '#d32f2f' }}>{error}</div>;
+    return <div style={{ padding: 16, color: "#d32f2f" }}>{error}</div>;
   }
 
   if (tree.length === 0) {
     return (
-      <div style={{ padding: 16, color: '#888', textAlign: 'center' }}>
+      <div style={{ padding: 16, color: "#888", textAlign: "center" }}>
         <p>No folders yet</p>
-        <button
-          onClick={() => onCreateFolder(null)}
-          style={{ padding: '6px 12px', cursor: 'pointer' }}
-        >
-          Create First Folder
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => onCreateFolder(null)}
+            style={{ padding: "6px 12px", cursor: "pointer" }}
+          >
+            Create First Folder
+          </button>
+        )}
       </div>
     );
   }
 
   return (
     <div
-      style={{ padding: '8px 0' }}
+      style={{ padding: "8px 0" }}
       onDragOver={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -144,7 +159,7 @@ export default function FolderTree({
         handleDrop(null);
       }}
     >
-      {tree.map(node => (
+      {tree.map((node) => (
         <FolderTreeNodeComponent
           key={node.id}
           node={node}
@@ -164,6 +179,7 @@ export default function FolderTree({
           onDiscuss={onDiscuss}
           isFavorite={favoriteFolderIds?.has(node.id) ?? false}
           favoriteFolderIds={favoriteFolderIds}
+          readOnly={readOnly}
         />
       ))}
     </div>

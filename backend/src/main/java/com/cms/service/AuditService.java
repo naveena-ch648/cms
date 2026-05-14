@@ -2,6 +2,7 @@ package com.cms.service;
 
 import com.cms.entity.*;
 import com.cms.repository.AuditEventRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -22,6 +23,7 @@ public class AuditService {
     private final AuditSearchService auditSearchService;
     private final AuditAlertService auditAlertService;
     private final StringRedisTemplate redisTemplate;
+    private final ObjectMapper objectMapper;
 
     private static final String BUFFER_KEY = "audit:buffer";
 
@@ -61,12 +63,36 @@ public class AuditService {
                 .resourceType(resourceType)
                 .resourceId(resourceId)
                 .outcome("SUCCESS")
-                .details(details)
+                .details(toJsonDetails(details))
                 .ipAddress(ipAddress)
                 .actorName(user != null ? user.getEmail() : "system")
                 .build();
         AuditEvent saved = auditEventRepository.save(event);
         indexToOpenSearch(saved);
+    }
+
+    /**
+     * Ensures the details string is stored as valid JSON in the MySQL JSON column.
+     * Plain strings (e.g. "Created folder: X") are wrapped as JSON strings.
+     * Null is passed through as-is (SQL NULL is valid for JSON columns).
+     */
+    private String toJsonDetails(String details) {
+        if (details == null) {
+            return null;
+        }
+        try {
+            // Already valid JSON (object, array, or quoted string) — use as-is
+            objectMapper.readTree(details);
+            return details;
+        } catch (Exception e) {
+            // Plain string — serialize it as a JSON string value
+            try {
+                return objectMapper.writeValueAsString(details);
+            } catch (Exception ex) {
+                log.warn("Could not JSON-encode audit details: {}", details);
+                return null;
+            }
+        }
     }
 
     public void log(Organization org, User user, String eventType) {

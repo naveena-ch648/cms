@@ -3,9 +3,9 @@ spring:
     name: cms-backend
 
   datasource:
-    url: jdbc:mysql://localhost:3307/cms?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
-    username: cmsuser
-    password: cmspassword
+    url: jdbc:mysql://cms-mysql:3307/cms?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: root
+    password: root
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       maximum-pool-size: 20
@@ -27,7 +27,7 @@ spring:
 
   data:
     redis:
-      host: localhost
+      host: cms-redis
       port: 6379
       timeout: 2000ms
 
@@ -45,27 +45,27 @@ server:
   port: 8080
 
 minio:
-  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  endpoint: ${MINIO_ENDPOINT:http://cms-minio:9000}
   public-endpoint: ${MINIO_PUBLIC_ENDPOINT:}
   access-key: ${MINIO_ACCESS_KEY:minioadmin}
   secret-key: ${MINIO_SECRET_KEY:minioadmin}
   region: us-east-1
 
 opensearch:
-  host: ${OPENSEARCH_HOST:localhost}
+  host: ${OPENSEARCH_HOST:cms-opensearch}
   port: ${OPENSEARCH_PORT:9200}
   scheme: http
   index-name: cms_files
 
 qdrant:
-  host: ${QDRANT_HOST:localhost}
+  host: ${QDRANT_HOST:cms-qdrant}
   port: ${QDRANT_PORT:6333}
   collection-name: document_chunks
 
 llm:
   provider: ${LLM_PROVIDER:openai}
   openai:
-    api-key: ${OPENAI_API_KEY:}
+    api-key: ${OPENAI_API_KEY:openai-api-key}
     model: ${OPENAI_MODEL:gpt-4o-mini}
     temperature: 0.1
     max-tokens: 1024

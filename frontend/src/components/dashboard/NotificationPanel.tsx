@@ -1,188 +1,210 @@
-import { useEffect, useState } from 'react';
-import { notificationsApi } from '../../api/notifications';
-
-interface Notification {
-  id: string;
-  type: string;
-  title: string;
-  message: string;
-  targetType: string;
-  targetId: string;
-  read: boolean;
-  createdAt: string;
-  actor?: { id: string; name: string };
-}
+import type { NotificationItem } from "../../types/collaboration";
 
 interface Props {
-  open: boolean;
+  notifications: NotificationItem[];
+  loading: boolean;
+  unreadCount: number;
+  onMarkRead: (id: string) => void;
+  onMarkAllRead: () => void;
   onClose: () => void;
 }
 
-export default function NotificationPanel({ open, onClose }: Props) {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
+function relTime(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const m = Math.floor(diff / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
 
-  const load = (pageNum: number, append = false) => {
-    setLoading(true);
-    notificationsApi.getNotifications({ page: pageNum, size: 15 })
-      .then((res) => {
-        const data = res.data.data as unknown as Notification[];
-        if (append) {
-          setNotifications((prev) => [...prev, ...data]);
-        } else {
-          setNotifications(data);
-        }
-        setHasMore(data.length === 15);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    if (open) {
-      setPage(0);
-      load(0);
-    }
-  }, [open]);
-
-  const handleMarkRead = async (id: string) => {
-    await notificationsApi.markAsRead(id);
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    );
-  };
-
-  const handleMarkAllRead = async () => {
-    await notificationsApi.markAllAsRead();
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  };
-
-  const handleLoadMore = () => {
-    const next = page + 1;
-    setPage(next);
-    load(next, true);
-  };
-
-  const formatTime = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMin = Math.floor(diffMs / 60000);
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago`;
-    const diffDays = Math.floor(diffHr / 24);
-    return `${diffDays}d ago`;
-  };
-
-  if (!open) return null;
-
+export default function NotificationPanel({
+  notifications,
+  loading,
+  unreadCount,
+  onMarkRead,
+  onMarkAllRead,
+  onClose,
+}: Props) {
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      right: 0,
-      width: '400px',
-      height: '100vh',
-      background: '#fff',
-      boxShadow: '-4px 0 20px rgba(0,0,0,0.1)',
-      zIndex: 1000,
-      display: 'flex',
-      flexDirection: 'column',
-    }}>
-      <div style={{
-        padding: '16px 20px',
-        borderBottom: '1px solid #e2e8f0',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-      }}>
-        <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Notifications</h3>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <button
-            onClick={handleMarkAllRead}
-            style={{ fontSize: '12px', color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer' }}
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: "fixed",
+        top: 0,
+        right: 0,
+        width: "380px",
+        height: "100vh",
+        background: "#fff",
+        boxShadow: "-4px 0 24px rgba(0,0,0,0.12)",
+        zIndex: 501,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          padding: "16px 18px",
+          borderBottom: "1px solid #e2e8f0",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <div>
+          <h3
+            style={{
+              margin: 0,
+              fontSize: "15px",
+              fontWeight: 600,
+              color: "#1e293b",
+            }}
           >
-            Mark all read
-          </button>
+            Notifications
+          </h3>
+          {unreadCount > 0 && (
+            <div
+              style={{ fontSize: "12px", color: "#94a3b8", marginTop: "2px" }}
+            >
+              {unreadCount} unread
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          {unreadCount > 0 && (
+            <button
+              onClick={onMarkAllRead}
+              style={{
+                fontSize: "12px",
+                color: "#3b82f6",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                fontWeight: 500,
+              }}
+            >
+              Mark all read
+            </button>
+          )}
           <button
             onClick={onClose}
-            style={{ fontSize: '18px', background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: "#94a3b8",
+              fontSize: "18px",
+              lineHeight: 1,
+              padding: "2px",
+            }}
           >
             ✕
           </button>
         </div>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+      {/* Body */}
+      <div style={{ flex: 1, overflow: "auto" }}>
         {loading && notifications.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>Loading...</div>
+          <div style={{ padding: "32px", textAlign: "center" }}>
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "8px" }}
+            >
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    height: "52px",
+                    borderRadius: "8px",
+                    background: "#f1f5f9",
+                  }}
+                />
+              ))}
+            </div>
+          </div>
         ) : notifications.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
-            No notifications yet
+          <div style={{ padding: "60px", textAlign: "center" }}>
+            <div style={{ fontSize: "32px", marginBottom: "10px" }}>🔔</div>
+            <div style={{ color: "#94a3b8", fontSize: "14px" }}>
+              No notifications yet
+            </div>
           </div>
         ) : (
-          <>
-            {notifications.map((n) => (
+          notifications.map((n) => (
+            <div
+              key={n.id}
+              onClick={() => !n.read && onMarkRead(n.id)}
+              style={{
+                padding: "12px 18px",
+                borderBottom: "1px solid #f1f5f9",
+                background: n.read ? "#fff" : "#f0f9ff",
+                cursor: n.read ? "default" : "pointer",
+                display: "flex",
+                gap: "10px",
+                alignItems: "flex-start",
+              }}
+            >
+              {/* Unread dot */}
               <div
-                key={n.id}
                 style={{
-                  padding: '12px 20px',
-                  borderBottom: '1px solid #f1f5f9',
-                  background: n.read ? '#fff' : '#f0f9ff',
-                  cursor: 'pointer',
+                  width: "7px",
+                  height: "7px",
+                  borderRadius: "50",
+                  flexShrink: 0,
+                  marginTop: "6px",
+                  background: n.read ? "transparent" : "#3b82f6",
                 }}
-                onClick={() => !n.read && handleMarkRead(n.id)}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ margin: 0, fontSize: '13px', fontWeight: n.read ? 400 : 600, color: '#1e293b' }}>
-                      {n.title}
-                    </p>
-                    {n.message && (
-                      <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#64748b' }}>
-                        {n.message}
-                      </p>
-                    )}
-                  </div>
-                  {!n.read && (
-                    <span style={{
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '50%',
-                      background: '#3b82f6',
-                      flexShrink: 0,
-                      marginTop: '4px',
-                    }} />
-                  )}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: "13px",
+                    fontWeight: n.read ? 400 : 600,
+                    color: "#1e293b",
+                  }}
+                >
+                  {n.title}
                 </div>
-                <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#94a3b8' }}>
-                  {n.actor?.name && `${n.actor.name} • `}{formatTime(n.createdAt)}
-                </p>
+                {n.message && (
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      color: "#64748b",
+                      marginTop: "2px",
+                    }}
+                  >
+                    {n.message}
+                  </div>
+                )}
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "#94a3b8",
+                    marginTop: "4px",
+                  }}
+                >
+                  {n.actor?.name && `${n.actor.name} · `}
+                  {relTime(n.createdAt)}
+                </div>
               </div>
-            ))}
-            {hasMore && (
-              <button
-                onClick={handleLoadMore}
-                disabled={loading}
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  padding: '12px',
-                  fontSize: '13px',
-                  color: '#3b82f6',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
-              >
-                {loading ? 'Loading...' : 'Load more'}
-              </button>
-            )}
-          </>
+            </div>
+          ))
         )}
+      </div>
+
+      {/* Footer */}
+      <div
+        style={{
+          padding: "12px 18px",
+          borderTop: "1px solid #e2e8f0",
+          fontSize: "12px",
+          color: "#94a3b8",
+          textAlign: "center",
+        }}
+      >
+        Auto-refreshes every 30s
       </div>
     </div>
   );

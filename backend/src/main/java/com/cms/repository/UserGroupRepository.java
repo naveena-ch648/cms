@@ -13,6 +13,7 @@ public interface UserGroupRepository extends JpaRepository<UserGroup, UserGroup.
     void deleteByUserIdAndGroupId(Long userId, Long groupId);
     void deleteByGroupId(Long groupId);
     boolean existsByUserIdAndGroupId(Long userId, Long groupId);
+    long countByGroupId(Long groupId);
 
     @Query("SELECT ug.groupId FROM UserGroup ug WHERE ug.userId = :userId")
     List<Long> findGroupIdsByUserId(@Param("userId") Long userId);

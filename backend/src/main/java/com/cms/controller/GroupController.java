@@ -2,7 +2,9 @@ package com.cms.controller;
 
 import com.cms.dto.ApiResponse;
 import com.cms.dto.group.*;
+import com.cms.dto.user.UserResponse;
 import com.cms.entity.Group;
+import com.cms.entity.User;
 import com.cms.middleware.TenantContext;
 import com.cms.service.GroupService;
 import jakarta.validation.Valid;
@@ -29,8 +31,9 @@ public class GroupController {
             @Valid @RequestBody CreateGroupRequest request) {
         Long orgId = TenantContext.getCurrentTenant();
         Group group = groupService.create(orgId, request.getName(), request.getDescription());
+        int count = (int) groupService.countMembers(group.getId());
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.ok(GroupResponse.from(group)));
+                .body(ApiResponse.ok(GroupResponse.from(group, count)));
     }
 
     @GetMapping
@@ -38,7 +41,8 @@ public class GroupController {
         Long orgId = TenantContext.getCurrentTenant();
         Page<Group> page = groupService.list(orgId, pageable);
         List<GroupResponse> groups = page.getContent().stream()
-                .map(GroupResponse::from).toList();
+                .map(g -> GroupResponse.from(g, (int) groupService.countMembers(g.getId())))
+                .toList();
         ApiResponse.PagedMeta meta = ApiResponse.PagedMeta.builder()
                 .page(page.getNumber())
                 .size(page.getSize())
@@ -51,7 +55,15 @@ public class GroupController {
     @GetMapping("/{groupId}")
     public ResponseEntity<ApiResponse<GroupResponse>> getById(@PathVariable String groupId) {
         Group group = groupService.getById(groupId);
-        return ResponseEntity.ok(ApiResponse.ok(GroupResponse.from(group)));
+        int count = (int) groupService.countMembers(group.getId());
+        return ResponseEntity.ok(ApiResponse.ok(GroupResponse.from(group, count)));
+    }
+
+    @GetMapping("/{groupId}/members")
+    public ResponseEntity<ApiResponse<List<UserResponse>>> getMembers(@PathVariable String groupId) {
+        List<User> users = groupService.getUsersInGroup(groupId);
+        List<UserResponse> responses = users.stream().map(UserResponse::from).toList();
+        return ResponseEntity.ok(ApiResponse.ok(responses));
     }
 
     @PutMapping("/{groupId}")
@@ -59,7 +71,8 @@ public class GroupController {
     public ResponseEntity<ApiResponse<GroupResponse>> update(
             @PathVariable String groupId, @Valid @RequestBody UpdateGroupRequest request) {
         Group group = groupService.update(groupId, request.getName(), request.getDescription());
-        return ResponseEntity.ok(ApiResponse.ok(GroupResponse.from(group)));
+        int count = (int) groupService.countMembers(group.getId());
+        return ResponseEntity.ok(ApiResponse.ok(GroupResponse.from(group, count)));
     }
 
     @DeleteMapping("/{groupId}")
@@ -80,7 +93,7 @@ public class GroupController {
     @DeleteMapping("/{groupId}/members/{userId}")
     @PreAuthorize("hasPermission(null, 'manage-groups')")
     public ResponseEntity<ApiResponse<Void>> removeMember(
-            @PathVariable String groupId, @PathVariable Long userId) {
+            @PathVariable String groupId, @PathVariable String userId) {
         groupService.removeMember(groupId, userId);
         return ResponseEntity.ok(ApiResponse.ok(null));
     }

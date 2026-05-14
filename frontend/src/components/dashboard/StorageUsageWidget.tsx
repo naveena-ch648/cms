@@ -1,89 +1,153 @@
-import { useEffect, useState } from 'react';
-import { getDashboardSummary } from '../../api/dashboard';
+import type { DashboardSummary } from "../../types/dashboard";
 
-export default function StorageUsageWidget() {
-  const [storageUsedBytes, setStorageUsedBytes] = useState(0);
-  const [storageMaxBytes, setStorageMaxBytes] = useState(0);
-  const [storagePercentage, setStoragePercentage] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+interface Props {
+  summary: DashboardSummary | null;
+  loading: boolean;
+}
 
-  useEffect(() => {
-    getDashboardSummary()
-      .then((summary) => {
-        setStorageUsedBytes(summary.storageUsedBytes);
-        setStorageMaxBytes(summary.storageMaxBytes);
-        setStoragePercentage(summary.storagePercentage);
-      })
-      .catch(() => setError('Failed to load storage info'))
-      .finally(() => setLoading(false));
-  }, []);
+function formatBytes(bytes: number) {
+  if (!bytes) return "0 B";
+  const k = 1024,
+    sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+}
 
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-  };
-
-  const getBarColor = () => {
-    if (storagePercentage >= 95) return '#ef4444';
-    if (storagePercentage >= 80) return '#f59e0b';
-    return '#3b82f6';
-  };
-
-  const getStatusText = () => {
-    if (storagePercentage >= 95) return 'Critical — storage almost full';
-    if (storagePercentage >= 80) return 'Warning — storage is getting full';
-    return '';
-  };
+export default function StorageUsageWidget({ summary, loading }: Props) {
+  const pct = summary?.storagePercentage ?? 0;
+  const barColor = pct >= 95 ? "#ef4444" : pct >= 80 ? "#f59e0b" : "#3b82f6";
+  const statusLabel =
+    pct >= 95
+      ? "🚨 Critical — storage almost full"
+      : pct >= 80
+        ? "⚠️ Warning — storage getting full"
+        : null;
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-semibold mb-4">Storage Usage</h3>
-        <div className="animate-pulse h-16 bg-gray-200 rounded" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-semibold mb-4">Storage Usage</h3>
-        <p className="text-red-500 text-sm">{error}</p>
+      <div
+        style={{
+          background: "#fff",
+          borderRadius: "12px",
+          border: "1px solid #e2e8f0",
+          padding: "20px",
+        }}
+      >
+        <h3
+          style={{
+            margin: "0 0 14px",
+            fontSize: "14px",
+            fontWeight: 600,
+            color: "#1e293b",
+          }}
+        >
+          💾 Storage Usage
+        </h3>
+        <div
+          style={{ height: "72px", borderRadius: "8px", background: "#f1f5f9" }}
+        />
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <h3 className="text-lg font-semibold mb-4">Storage Usage</h3>
-      <div className="space-y-3">
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-600">
-            {formatBytes(storageUsedBytes)} of {formatBytes(storageMaxBytes)} used
+    <div
+      style={{
+        background: "#fff",
+        borderRadius: "12px",
+        border: "1px solid #e2e8f0",
+        padding: "20px",
+      }}
+    >
+      <h3
+        style={{
+          margin: "0 0 16px",
+          fontSize: "14px",
+          fontWeight: 600,
+          color: "#1e293b",
+        }}
+      >
+        💾 Storage Usage
+      </h3>
+
+      {/* Percentage display */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          marginBottom: "8px",
+        }}
+      >
+        <span style={{ fontSize: "13px", color: "#64748b" }}>
+          {formatBytes(summary?.storageUsedBytes ?? 0)} used
+          <span style={{ color: "#94a3b8" }}>
+            {" "}
+            of {formatBytes(summary?.storageMaxBytes ?? 0)}
           </span>
-          <span className="font-medium" style={{ color: getBarColor() }}>
-            {storagePercentage.toFixed(1)}%
-          </span>
-        </div>
-        <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
-          <div
-            className="h-full rounded-full transition-all duration-500"
-            style={{
-              width: `${Math.min(storagePercentage, 100)}%`,
-              backgroundColor: getBarColor(),
-            }}
-          />
-        </div>
-        {getStatusText() && (
-          <p className="text-xs" style={{ color: getBarColor() }}>
-            {getStatusText()}
-          </p>
-        )}
+        </span>
+        <span style={{ fontSize: "16px", fontWeight: 700, color: barColor }}>
+          {pct.toFixed(1)}%
+        </span>
       </div>
+
+      {/* Progress bar */}
+      <div
+        style={{
+          height: "10px",
+          background: "#f1f5f9",
+          borderRadius: "999px",
+          overflow: "hidden",
+          marginBottom: "10px",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            borderRadius: "999px",
+            width: `${Math.min(pct, 100)}%`,
+            background:
+              pct >= 95
+                ? "linear-gradient(90deg, #ef4444, #dc2626)"
+                : pct >= 80
+                  ? "linear-gradient(90deg, #f59e0b, #d97706)"
+                  : "linear-gradient(90deg, #3b82f6, #2563eb)",
+            transition: "width 0.6s ease",
+          }}
+        />
+      </div>
+
+      {/* Markers */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: "10px",
+          color: "#cbd5e1",
+          marginBottom: "8px",
+        }}
+      >
+        <span>0%</span>
+        <span style={{ color: pct >= 80 ? "#f59e0b" : "#cbd5e1" }}>80%</span>
+        <span style={{ color: pct >= 95 ? "#ef4444" : "#cbd5e1" }}>95%</span>
+        <span>100%</span>
+      </div>
+
+      {statusLabel && (
+        <div
+          style={{
+            padding: "8px 12px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontWeight: 500,
+            background: pct >= 95 ? "#fef2f2" : "#fffbeb",
+            color: pct >= 95 ? "#dc2626" : "#d97706",
+            border: `1px solid ${pct >= 95 ? "#fecaca" : "#fed7aa"}`,
+          }}
+        >
+          {statusLabel}
+        </div>
+      )}
     </div>
   );
 }

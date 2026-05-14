@@ -20,6 +20,8 @@ export default function GroupManagement() {
 
   // Members
   const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [currentMembers, setCurrentMembers] = useState<User[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
   const [memberSearch, setMemberSearch] = useState('');
 
   const showNotif = useCallback((type: 'success' | 'error', message: string) => {
@@ -42,13 +44,6 @@ export default function GroupManagement() {
 
   useEffect(() => { fetchGroups(); }, [fetchGroups]);
 
-  const fetchAllUsers = useCallback(async () => {
-    try {
-      const res = await usersApi.list({ size: 200 });
-      setAllUsers(res.data.data || []);
-    } catch { /* ignore */ }
-  }, []);
-
   const openCreateDialog = () => {
     setEditingGroup(null);
     setFormData({ name: '', description: '' });
@@ -63,10 +58,29 @@ export default function GroupManagement() {
 
   const openMembersPanel = async (group: Group) => {
     setSelectedGroup(group);
-    setShowMembersPanel(true);
+    setCurrentMembers([]);
     setMemberSearch('');
-    await fetchAllUsers();
+    setShowMembersPanel(true);
+    setMembersLoading(true);
+    try {
+      const [membersRes, usersRes] = await Promise.all([
+        groupsApi.getMembers(group.id),
+        usersApi.list({ size: 200 }),
+      ]);
+      setCurrentMembers(membersRes.data.data || []);
+      setAllUsers(usersRes.data.data || []);
+    } catch {
+      showNotif('error', 'Failed to load members');
+    } finally {
+      setMembersLoading(false);
+    }
+  };
 
+  const refreshMembers = async (groupId: string) => {
+    try {
+      const res = await groupsApi.getMembers(groupId);
+      setCurrentMembers(res.data.data || []);
+    } catch { /* ignore */ }
   };
 
   const handleSave = async () => {
@@ -101,20 +115,37 @@ export default function GroupManagement() {
   const handleAddMember = async (user: User) => {
     if (!selectedGroup) return;
     try {
-      await groupsApi.addMember(selectedGroup.id, Number(user.id));
+      await groupsApi.addMember(selectedGroup.id, user.id);
       showNotif('success', `Added ${user.firstName} ${user.lastName} to group`);
+      setMemberSearch('');
+      await refreshMembers(selectedGroup.id);
       fetchGroups();
     } catch (err: any) {
       showNotif('error', err.response?.data?.error?.message || 'Failed to add member');
     }
   };
 
+  const handleRemoveMember = async (user: User) => {
+    if (!selectedGroup) return;
+    try {
+      await groupsApi.removeMember(selectedGroup.id, user.id);
+      showNotif('success', `Removed ${user.firstName} ${user.lastName} from group`);
+      await refreshMembers(selectedGroup.id);
+      fetchGroups();
+    } catch (err: any) {
+      showNotif('error', err.response?.data?.error?.message || 'Failed to remove member');
+    }
+  };
+
+  const currentMemberIds = new Set(currentMembers.map(u => u.id));
+
   const filteredGroups = groups.filter(g =>
     !searchTerm || g.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const filteredUsers = allUsers.filter(u =>
-    !memberSearch || `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(memberSearch.toLowerCase())
+    !currentMemberIds.has(u.id) &&
+    (!memberSearch || `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(memberSearch.toLowerCase()))
   );
 
   return (
@@ -231,34 +262,64 @@ export default function GroupManagement() {
       {/* Members Panel */}
       {showMembersPanel && selectedGroup && (
         <div style={styles.overlay} onClick={() => setShowMembersPanel(false)}>
-          <div style={{ ...styles.dialog, width: '520px' }} onClick={e => e.stopPropagation()}>
+          <div style={{ ...styles.dialog, width: '540px' }} onClick={e => e.stopPropagation()}>
             <div style={styles.dialogHeader}>
               <h3 style={{ margin: 0, fontSize: '16px', color: '#1e293b' }}>Members — {selectedGroup.name}</h3>
               <button onClick={() => setShowMembersPanel(false)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '18px', color: '#94a3b8' }}>✕</button>
             </div>
             <div style={styles.dialogBody}>
+              {/* Current members list */}
+              <div style={{ marginBottom: '16px' }}>
+                <label style={styles.label}>Current Members ({currentMembers.length})</label>
+                {membersLoading ? (
+                  <div style={{ fontSize: '13px', color: '#94a3b8', padding: '8px 0' }}>Loading...</div>
+                ) : currentMembers.length === 0 ? (
+                  <div style={{ fontSize: '13px', color: '#94a3b8', padding: '8px 0' }}>No members yet</div>
+                ) : (
+                  <div style={{ border: '1px solid #e2e8f0', borderRadius: '6px', maxHeight: '180px', overflow: 'auto' }}>
+                    {currentMembers.map(user => (
+                      <div key={user.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #f1f5f9' }}>
+                        <div>
+                          <span style={{ fontSize: '13px', fontWeight: 500, color: '#1e293b' }}>{user.firstName} {user.lastName}</span>
+                          <span style={{ fontSize: '12px', color: '#94a3b8', marginLeft: '8px' }}>{user.email}</span>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveMember(user)}
+                          style={{ ...styles.actionBtn, color: '#dc2626', borderColor: '#fecaca' }}
+                        >Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Add member search */}
               <div style={styles.formGroup}>
                 <label style={styles.label}>Add Member</label>
                 <input
                   style={styles.input}
-                  placeholder="Search users..."
+                  placeholder="Search users to add..."
                   value={memberSearch}
                   onChange={e => setMemberSearch(e.target.value)}
                 />
               </div>
               {memberSearch && (
-                <div style={{ maxHeight: '200px', overflow: 'auto', border: '1px solid #e2e8f0', borderRadius: '6px', marginBottom: '16px' }}>
-                  {filteredUsers.slice(0, 10).map(user => (
-                    <div key={user.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #f1f5f9' }}>
-                      <span style={{ fontSize: '13px' }}>{user.firstName} {user.lastName} ({user.email})</span>
-                      <button onClick={() => handleAddMember(user)} style={styles.actionBtn}>Add</button>
-                    </div>
-                  ))}
-                </div>
+                filteredUsers.length === 0 ? (
+                  <div style={{ fontSize: '13px', color: '#94a3b8', padding: '8px 0' }}>No users found (or all matching users are already members)</div>
+                ) : (
+                  <div style={{ maxHeight: '180px', overflow: 'auto', border: '1px solid #e2e8f0', borderRadius: '6px', marginBottom: '8px' }}>
+                    {filteredUsers.slice(0, 10).map(user => (
+                      <div key={user.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #f1f5f9' }}>
+                        <div>
+                          <span style={{ fontSize: '13px', fontWeight: 500, color: '#1e293b' }}>{user.firstName} {user.lastName}</span>
+                          <span style={{ fontSize: '12px', color: '#94a3b8', marginLeft: '8px' }}>{user.email}</span>
+                        </div>
+                        <button onClick={() => handleAddMember(user)} style={{ ...styles.actionBtn, color: '#2563eb', borderColor: '#bfdbfe' }}>Add</button>
+                      </div>
+                    ))}
+                  </div>
+                )
               )}
-              <p style={{ fontSize: '13px', color: '#64748b' }}>
-                Current member count: <strong>{selectedGroup.memberCount}</strong>
-              </p>
             </div>
           </div>
         </div>

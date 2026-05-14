@@ -16,4 +16,6 @@ public interface UserWorkspaceRoleRepository extends JpaRepository<UserWorkspace
 
     @Query("SELECT uwr.workspace.id FROM UserWorkspaceRole uwr WHERE uwr.userId = :userId")
     List<Long> findWorkspaceIdsByUserId(@Param("userId") Long userId);
+
+    long countByWorkspaceId(Long workspaceId);
 }
