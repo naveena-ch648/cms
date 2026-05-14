@@ -455,7 +455,7 @@ export default function WorkspacePage() {
                   }
                   setCollaborationFileId(file.id);
                 }}
-                onShare={(file) => setShareFile(file)}
+                onShare={canWrite ? (file) => setShareFile(file) : undefined}
                 onBulkEdit={(fileIds) => setBulkEditFileIds(fileIds)}
                 loading={filesLoading}
               />
