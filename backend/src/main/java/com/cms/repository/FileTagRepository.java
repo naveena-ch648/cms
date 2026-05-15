@@ -19,4 +19,6 @@ public interface FileTagRepository extends JpaRepository<FileTag, Long> {
     List<FileTag> findByFileIdIn(List<Long> fileIds);
 
     void deleteByFileIdAndNameIgnoreCase(Long fileId, String name);
+
+    List<FileTag> findDistinctByWorkspaceIdOrderByName(Long workspaceId);
 }

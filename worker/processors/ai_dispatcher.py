@@ -1,12 +1,13 @@
-"""AI Dispatcher — consumes ai:process Redis queue and routes jobs to processors."""
+"""AI Dispatcher — consumes ai:process queue from PostgreSQL and routes jobs to processors."""
 
 import json
 import time
 import traceback
 from datetime import datetime, timezone
 
+import psycopg2
+import psycopg2.extras
 import pymysql
-import redis
 
 from config import Config
 
@@ -116,43 +117,94 @@ def process_ai_job(job_data):
         raise
 
 
-def run_ai_worker(r: redis.Redis, is_running):
-    """Main loop for AI worker — consumes from ai:process queue."""
-    print(f"AI worker started — listening on queue: {Config.AI_QUEUE}")
+def run_ai_worker(conn, is_running):
+    """Main loop for AI worker — polls ai:process queue in PostgreSQL."""
+    print(f"AI worker started — polling queue: {Config.AI_QUEUE}")
 
     while is_running():
         try:
-            result = r.brpop([Config.AI_QUEUE], timeout=5)
-            if result is None:
+            job = _claim_job(conn, [Config.AI_QUEUE])
+            if job is None:
+                time.sleep(Config.POLL_INTERVAL)
                 continue
 
-            _, payload = result
-            job_data = json.loads(payload)
-            job_id = job_data.get("jobId", "unknown")
-            retry_count = job_data.get("_retries", 0)
-
+            job_id, queue_name, payload, retry_count = job
             try:
+                job_data = json.loads(payload)
                 process_ai_job(job_data)
+                _ack_job(conn, job_id)
             except Exception as e:
                 print(f"AI job error: {e}")
                 traceback.print_exc()
+                _fail_job(conn, job_id, str(e), Config.AI_MAX_RETRIES, Config.AI_QUEUE, Config.AI_DLQ)
 
-                if retry_count < Config.AI_MAX_RETRIES:
-                    job_data["_retries"] = retry_count + 1
-                    delay = min(5 * (2 ** retry_count), 60)
-                    time.sleep(delay)
-                    r.lpush(Config.AI_QUEUE, json.dumps(job_data))
-                    print(f"Retrying AI job {job_id} (attempt {retry_count + 1}/{Config.AI_MAX_RETRIES}) after {delay}s")
-                else:
-                    r.lpush(Config.AI_DLQ, json.dumps(job_data))
-                    print(f"AI job {job_id} moved to DLQ after {Config.AI_MAX_RETRIES} failures")
-
-        except redis.ConnectionError:
-            print("AI worker: Redis connection lost, reconnecting in 5s...")
+        except psycopg2.OperationalError:
+            print("AI worker: PostgreSQL connection lost, reconnecting in 5s...")
             time.sleep(5)
+            try:
+                conn = _get_pg_conn()
+            except Exception:
+                pass
         except Exception as e:
             print(f"AI worker unexpected error: {e}")
             traceback.print_exc()
             time.sleep(1)
 
     print("AI worker stopped.")
+
+
+def _get_pg_conn():
+    return psycopg2.connect(
+        host=Config.PG_HOST,
+        port=Config.PG_PORT,
+        dbname=Config.PG_DB,
+        user=Config.PG_USER,
+        password=Config.PG_PASSWORD,
+    )
+
+
+def _claim_job(conn, queue_names):
+    with conn.cursor() as cur:
+        cur.execute(
+            """UPDATE job_queue SET status='PROCESSING', updated_at=NOW()
+               WHERE id = (
+                   SELECT id FROM job_queue
+                   WHERE queue_name = ANY(%s) AND status='PENDING'
+                     AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
+                   ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED
+               ) RETURNING id, queue_name, payload, retry_count""",
+            (queue_names,),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return row
+
+
+def _ack_job(conn, job_id):
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM job_queue WHERE id = %s", (job_id,))
+    conn.commit()
+
+
+def _fail_job(conn, job_id, error_msg, max_retries, queue_name, dlq_name):
+    with conn.cursor() as cur:
+        cur.execute("SELECT retry_count FROM job_queue WHERE id = %s", (job_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.commit()
+            return
+        retry_count = row[0] + 1
+        if retry_count < max_retries:
+            delay = min(5 * (2 ** retry_count), 300)
+            cur.execute(
+                """UPDATE job_queue SET status='PENDING', retry_count=%s, error_msg=%s,
+                   next_attempt_at=NOW() + (%s || ' seconds')::interval WHERE id=%s""",
+                (retry_count, error_msg[:2000], str(delay), job_id),
+            )
+        else:
+            cur.execute(
+                """UPDATE job_queue SET queue_name=%s, status='PENDING', retry_count=%s,
+                   error_msg=%s, next_attempt_at=NULL WHERE id=%s""",
+                (dlq_name, retry_count, error_msg[:2000], job_id),
+            )
+    conn.commit()

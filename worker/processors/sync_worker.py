@@ -1,4 +1,4 @@
-"""Integration sync worker — processes import/export jobs from Redis queues."""
+"""Integration sync worker — processes import/export jobs from PostgreSQL queues."""
 
 import json
 import io
@@ -6,12 +6,11 @@ import time
 import uuid
 from datetime import datetime
 
+import psycopg2
 import pymysql
-import redis
-import boto3
-from botocore.config import Config as BotoConfig
 
 from config import Config
+from processors.storage import put_object, get_object
 
 # Google Drive API
 try:
@@ -22,17 +21,6 @@ try:
 except ImportError:
     HAS_GOOGLE_API = False
     print("WARNING: google-api-python-client not installed. Import/export disabled.")
-
-
-def get_s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=Config.MINIO_ENDPOINT,
-        aws_access_key_id=Config.MINIO_ACCESS_KEY,
-        aws_secret_access_key=Config.MINIO_SECRET_KEY,
-        region_name=Config.MINIO_REGION,
-        config=BotoConfig(signature_version="s3v4"),
-    )
 
 
 def get_db_connection():
@@ -47,6 +35,27 @@ def get_db_connection():
     )
 
 
+def _get_pg_conn():
+    return psycopg2.connect(
+        host=Config.PG_HOST,
+        port=Config.PG_PORT,
+        dbname=Config.PG_DB,
+        user=Config.PG_USER,
+        password=Config.PG_PASSWORD,
+    )
+
+
+def _set_job_state(pg_conn, job_id, field, value):
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO integration_job_state (job_id, field, value, updated_at)
+               VALUES (%s, %s, %s, NOW())
+               ON CONFLICT (job_id, field) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()""",
+            (str(job_id), field, str(value)),
+        )
+    pg_conn.commit()
+
+
 def get_drive_service(access_token):
     if not HAS_GOOGLE_API:
         raise RuntimeError("google-api-python-client not installed")
@@ -54,7 +63,7 @@ def get_drive_service(access_token):
     return build("drive", "v3", credentials=creds)
 
 
-def process_import_job(r: redis.Redis, job_json: str):
+def process_import_job(pg_conn, job_json: str):
     """Process a Google Drive import job."""
     job = json.loads(job_json)
     job_id = job["jobId"]
@@ -67,12 +76,10 @@ def process_import_job(r: redis.Redis, job_json: str):
 
     print(f"[IMPORT] Job {job_id}: {len(drive_file_ids)} files -> folder {target_folder_id}")
 
-    # Update job status
-    r.hset(f"integration:job:{job_id}", "status", "IN_PROGRESS")
+    _set_job_state(pg_conn, job_id, "status", "IN_PROGRESS")
 
     completed = 0
     failed = 0
-    s3 = get_s3_client()
     db = get_db_connection()
 
     try:
@@ -80,29 +87,29 @@ def process_import_job(r: redis.Redis, job_json: str):
 
         for drive_file_id in drive_file_ids:
             try:
-                _import_single_file(drive, s3, db, drive_file_id, org_id, user_id, target_folder_id)
+                _import_single_file(drive, db, drive_file_id, org_id, user_id, target_folder_id)
                 completed += 1
-                r.hset(f"integration:job:{job_id}", "completedItems", str(completed))
+                _set_job_state(pg_conn, job_id, "completedItems", str(completed))
             except Exception as e:
                 print(f"[IMPORT] Failed to import {drive_file_id}: {e}")
                 failed += 1
-                r.hset(f"integration:job:{job_id}", "failedItems", str(failed))
+                _set_job_state(pg_conn, job_id, "failedItems", str(failed))
 
         status = "COMPLETED" if failed == 0 else "COMPLETED_WITH_ERRORS"
-        r.hset(f"integration:job:{job_id}", "status", status)
-        r.hset(f"integration:job:{job_id}", "completedAt", datetime.utcnow().isoformat())
+        _set_job_state(pg_conn, job_id, "status", status)
+        _set_job_state(pg_conn, job_id, "completedAt", datetime.utcnow().isoformat())
         print(f"[IMPORT] Job {job_id} done: {completed} imported, {failed} failed")
 
     except Exception as e:
         print(f"[IMPORT] Job {job_id} failed: {e}")
-        r.hset(f"integration:job:{job_id}", "status", "FAILED")
-        r.hset(f"integration:job:{job_id}", "error", str(e))
+        _set_job_state(pg_conn, job_id, "status", "FAILED")
+        _set_job_state(pg_conn, job_id, "error", str(e))
     finally:
         db.close()
 
 
-def _import_single_file(drive, s3, db, drive_file_id, org_id, user_id, target_folder_id):
-    """Download a single file from Google Drive and store in MinIO + DB."""
+def _import_single_file(drive, db, drive_file_id, org_id, user_id, target_folder_id):
+    """Download a single file from Google Drive and store in PostgreSQL storage + DB."""
     # Get file metadata from Drive
     file_meta = drive.files().get(
         fileId=drive_file_id,
@@ -132,17 +139,12 @@ def _import_single_file(drive, s3, db, drive_file_id, org_id, user_id, target_fo
     buffer.seek(0)
     file_size = buffer.getbuffer().nbytes
 
-    # Upload to MinIO
+    # Upload to PostgreSQL storage
     file_uuid = str(uuid.uuid4())
     bucket = "cms-files"
     storage_key = f"org-{org_id}/{file_uuid}/{file_name}"
 
-    s3.put_object(
-        Bucket=bucket,
-        Key=storage_key,
-        Body=buffer.getvalue(),
-        ContentType=mime_type,
-    )
+    put_object(bucket, storage_key, buffer.getvalue(), mime_type)
 
     # Insert file record into DB
     with db.cursor() as cursor:
@@ -157,7 +159,7 @@ def _import_single_file(drive, s3, db, drive_file_id, org_id, user_id, target_fo
     print(f"[IMPORT] Imported: {file_name} ({file_size} bytes)")
 
 
-def process_export_job(r: redis.Redis, job_json: str):
+def process_export_job(pg_conn, job_json: str):
     """Process an export-to-Drive job."""
     job = json.loads(job_json)
     job_id = job["jobId"]
@@ -169,11 +171,10 @@ def process_export_job(r: redis.Redis, job_json: str):
 
     print(f"[EXPORT] Job {job_id}: {len(file_ids)} files -> Drive folder {target_drive_folder_id}")
 
-    r.hset(f"integration:job:{job_id}", "status", "IN_PROGRESS")
+    _set_job_state(pg_conn, job_id, "status", "IN_PROGRESS")
 
     completed = 0
     failed = 0
-    s3 = get_s3_client()
     db = get_db_connection()
 
     try:
@@ -181,29 +182,29 @@ def process_export_job(r: redis.Redis, job_json: str):
 
         for file_id in file_ids:
             try:
-                _export_single_file(drive, s3, db, file_id, target_drive_folder_id, conflict_strategy)
+                _export_single_file(drive, db, file_id, target_drive_folder_id, conflict_strategy)
                 completed += 1
-                r.hset(f"integration:job:{job_id}", "completedItems", str(completed))
+                _set_job_state(pg_conn, job_id, "completedItems", str(completed))
             except Exception as e:
                 print(f"[EXPORT] Failed to export {file_id}: {e}")
                 failed += 1
-                r.hset(f"integration:job:{job_id}", "failedItems", str(failed))
+                _set_job_state(pg_conn, job_id, "failedItems", str(failed))
 
         status = "COMPLETED" if failed == 0 else "COMPLETED_WITH_ERRORS"
-        r.hset(f"integration:job:{job_id}", "status", status)
-        r.hset(f"integration:job:{job_id}", "completedAt", datetime.utcnow().isoformat())
+        _set_job_state(pg_conn, job_id, "status", status)
+        _set_job_state(pg_conn, job_id, "completedAt", datetime.utcnow().isoformat())
         print(f"[EXPORT] Job {job_id} done: {completed} exported, {failed} failed")
 
     except Exception as e:
         print(f"[EXPORT] Job {job_id} failed: {e}")
-        r.hset(f"integration:job:{job_id}", "status", "FAILED")
-        r.hset(f"integration:job:{job_id}", "error", str(e))
+        _set_job_state(pg_conn, job_id, "status", "FAILED")
+        _set_job_state(pg_conn, job_id, "error", str(e))
     finally:
         db.close()
 
 
-def _export_single_file(drive, s3, db, file_uuid, target_drive_folder_id, conflict_strategy):
-    """Upload a single file from MinIO to Google Drive."""
+def _export_single_file(drive, db, file_uuid, target_drive_folder_id, conflict_strategy):
+    """Upload a single file from PostgreSQL storage to Google Drive."""
     with db.cursor() as cursor:
         cursor.execute(
             "SELECT name, mime_type, size, storage_bucket, storage_key FROM files WHERE uuid = %s",
@@ -227,9 +228,8 @@ def _export_single_file(drive, s3, db, file_uuid, target_drive_folder_id, confli
         # Delete existing file
         drive.files().delete(fileId=existing[0]["id"]).execute()
 
-    # Download from MinIO
-    response = s3.get_object(Bucket=file_record["storage_bucket"], Key=file_record["storage_key"])
-    content = response["Body"].read()
+    # Download from PostgreSQL storage
+    content = get_object(file_record["storage_bucket"], file_record["storage_key"])
 
     # Upload to Drive
     file_metadata = {
@@ -267,27 +267,44 @@ def _adjust_filename(name, export_mime):
     return name
 
 
-def run_integration_worker(r: redis.Redis, running_flag):
-    """Main loop for the integration worker."""
-    print("[INTEGRATION] Worker started, waiting for jobs...")
+def run_integration_worker(conn, running_flag):
+    """Main loop for the integration worker — polls PostgreSQL job queues."""
+    print("[INTEGRATION] Worker started, polling for jobs...")
     while running_flag():
-        # Check import queue
-        job_json = r.rpop("integration:import")
-        if job_json:
+        job = _claim_job(conn, ["integration:import", "integration:export"])
+        if job:
+            job_id, queue_name, payload, _retries = job
             try:
-                process_import_job(r, job_json)
+                if queue_name == "integration:import":
+                    process_import_job(conn, payload)
+                else:
+                    process_export_job(conn, payload)
+                _ack_job(conn, job_id)
             except Exception as e:
-                print(f"[INTEGRATION] Import job error: {e}")
-            continue
+                print(f"[INTEGRATION] Job error: {e}")
+                _ack_job(conn, job_id)
+        else:
+            time.sleep(Config.POLL_INTERVAL)
 
-        # Check export queue
-        job_json = r.rpop("integration:export")
-        if job_json:
-            try:
-                process_export_job(r, job_json)
-            except Exception as e:
-                print(f"[INTEGRATION] Export job error: {e}")
-            continue
 
-        # No jobs, wait briefly
-        time.sleep(1)
+def _claim_job(conn, queue_names):
+    with conn.cursor() as cur:
+        cur.execute(
+            """UPDATE job_queue SET status='PROCESSING', updated_at=NOW()
+               WHERE id = (
+                   SELECT id FROM job_queue
+                   WHERE queue_name = ANY(%s) AND status='PENDING'
+                     AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
+                   ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED
+               ) RETURNING id, queue_name, payload, retry_count""",
+            (queue_names,),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return row
+
+
+def _ack_job(conn, job_id):
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM job_queue WHERE id = %s", (job_id,))
+    conn.commit()

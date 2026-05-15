@@ -2,14 +2,12 @@ import os
 
 
 class Config:
-    REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
-    REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
-
-    MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
-    MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
-    MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
-    MINIO_REGION = os.environ.get("MINIO_REGION", "us-east-1")
-    MINIO_USE_SSL = os.environ.get("MINIO_USE_SSL", "false").lower() == "true"
+    # PostgreSQL (replaces Redis + MinIO)
+    PG_HOST = os.environ.get("PG_HOST", "localhost")
+    PG_PORT = int(os.environ.get("PG_PORT", 5433))
+    PG_DB = os.environ.get("PG_DB", "cms_app")
+    PG_USER = os.environ.get("PG_USER", "cmsuser")
+    PG_PASSWORD = os.environ.get("PG_PASSWORD", "cmspassword")
 
     MYSQL_HOST = os.environ.get("MYSQL_HOST", "localhost")
     MYSQL_PORT = int(os.environ.get("MYSQL_PORT", 3306))
@@ -22,6 +20,7 @@ class Config:
     DEAD_LETTER_QUEUE = "file:process:dead"
     MAX_RETRIES = 3
     RETRY_DELAYS = [5, 25, 125]  # seconds
+    POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", 2.0))  # seconds between DB polls
 
     OPENSEARCH_HOST = os.environ.get("OPENSEARCH_HOST", "localhost")
     OPENSEARCH_PORT = int(os.environ.get("OPENSEARCH_PORT", 9200))

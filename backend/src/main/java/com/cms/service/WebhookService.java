@@ -10,7 +10,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,7 +27,7 @@ public class WebhookService {
     private final WebhookRepository webhookRepository;
     private final WebhookDeliveryRepository deliveryRepository;
     private final IntegrationTokenEncryptor tokenEncryptor;
-    private final StringRedisTemplate redisTemplate;
+    private final JobQueueService jobQueueService;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -193,7 +192,7 @@ public class WebhookService {
             delivery.put("organizationId", webhook.getOrganization().getId());
 
             String json = objectMapper.writeValueAsString(delivery);
-            redisTemplate.opsForList().leftPush("webhook:deliver", json);
+            jobQueueService.push("webhook:deliver", json);
         } catch (Exception e) {
             log.error("Failed to queue webhook delivery: {}", e.getMessage());
         }

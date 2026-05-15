@@ -10,11 +10,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -25,7 +23,6 @@ import java.util.stream.Collectors;
 public class DashboardService {
 
     private static final String DASHBOARD_SUMMARY_KEY_PREFIX = "dashboard:summary:";
-    private static final Duration CACHE_TTL = Duration.ofMinutes(2);
 
     private final FileRepository fileRepository;
     private final UserWorkspaceRoleRepository userWorkspaceRoleRepository;
@@ -35,7 +32,6 @@ public class DashboardService {
     private final AlertService alertService;
     private final SharedLinkRepository sharedLinkRepository;
     private final ApprovalRequestRepository approvalRequestRepository;
-    private final StringRedisTemplate redisTemplate;
     private final RecentFileService recentFileService;
 
     @Transactional(readOnly = true)
@@ -117,11 +113,7 @@ public class DashboardService {
     }
 
     public void invalidateSummaryCache(Long userId) {
-        try {
-            redisTemplate.delete(DASHBOARD_SUMMARY_KEY_PREFIX + userId);
-        } catch (Exception e) {
-            log.warn("Failed to invalidate dashboard cache for user {}: {}", userId, e.getMessage());
-        }
+        // No-op: caching removed
     }
 
     private List<Long> getUserWorkspaceIds(Long userId) {

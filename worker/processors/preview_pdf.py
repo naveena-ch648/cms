@@ -5,26 +5,16 @@ import os
 import tempfile
 import uuid
 
-import boto3
 import pymysql
 from PIL import Image
 from pdf2image import convert_from_path
 
 from config import Config
+from processors.storage import get_object, put_object
 
 THUMBNAIL_SIZE = (256, 256)
 PREVIEW_DPI = 150
 MAX_PAGES = 100
-
-
-def get_s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=Config.MINIO_ENDPOINT,
-        aws_access_key_id=Config.MINIO_ACCESS_KEY,
-        aws_secret_access_key=Config.MINIO_SECRET_KEY,
-        region_name=Config.MINIO_REGION,
-    )
 
 
 def get_db_connection():
@@ -99,14 +89,12 @@ def _update_job_status(conn, file_id, job_type, status):
 def process_pdf_thumbnail(file_id: str, org_id: str, storage_bucket: str, storage_key: str):
     """Generate a 256x256 thumbnail from the first page of a PDF."""
     conn = get_db_connection()
-    s3 = get_s3_client()
 
     try:
         _update_job_status(conn, file_id, "THUMBNAIL", "PROCESSING")
 
-        # Download PDF from MinIO
-        response = s3.get_object(Bucket=storage_bucket, Key=storage_key)
-        pdf_data = response["Body"].read()
+        # Download PDF from PostgreSQL storage
+        pdf_data = get_object(storage_bucket, storage_key)
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             tmp.write(pdf_data)
@@ -127,12 +115,7 @@ def process_pdf_thumbnail(file_id: str, org_id: str, storage_bucket: str, storag
 
             # Upload thumbnail
             thumb_key = f"thumbnails/{file_id}/thumbnail.jpg"
-            s3.put_object(
-                Bucket=storage_bucket,
-                Key=thumb_key,
-                Body=thumb_buffer.getvalue(),
-                ContentType="image/jpeg",
-            )
+            put_object(storage_bucket, thumb_key, thumb_buffer.getvalue(), "image/jpeg")
 
             # Update preview record
             _update_preview_record(
@@ -162,14 +145,12 @@ def process_pdf_thumbnail(file_id: str, org_id: str, storage_bucket: str, storag
 def process_pdf_preview(file_id: str, org_id: str, storage_bucket: str, storage_key: str):
     """Generate full page-by-page preview images from a PDF."""
     conn = get_db_connection()
-    s3 = get_s3_client()
 
     try:
         _update_job_status(conn, file_id, "FULL_PREVIEW", "PROCESSING")
 
-        # Download PDF from MinIO
-        response = s3.get_object(Bucket=storage_bucket, Key=storage_key)
-        pdf_data = response["Body"].read()
+        # Download PDF from PostgreSQL storage
+        pdf_data = get_object(storage_bucket, storage_key)
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             tmp.write(pdf_data)
@@ -194,12 +175,7 @@ def process_pdf_preview(file_id: str, org_id: str, storage_bucket: str, storage_
                 total_size += page_size
 
                 page_key = f"{key_prefix}/page-{i}.png"
-                s3.put_object(
-                    Bucket=storage_bucket,
-                    Key=page_key,
-                    Body=page_buffer.getvalue(),
-                    ContentType="image/png",
-                )
+                put_object(storage_bucket, page_key, page_buffer.getvalue(), "image/png")
 
             # Update preview record
             _update_preview_record(

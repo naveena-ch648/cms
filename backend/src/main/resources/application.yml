@@ -2,8 +2,13 @@ spring:
   application:
     name: cms-backend
 
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+
   datasource:
-    url: jdbc:mysql://cms-mysql:3307/cms?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    url: jdbc:mysql://localhost:3307/cms?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
     username: root
     password: root
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -18,17 +23,16 @@ spring:
     show-sql: false
     properties:
       hibernate:
-        dialect: org.hibernate.community.dialect.SQLiteDialect
+        dialect: org.hibernate.dialect.MySQLDialect
         format_sql: true
 
   flyway:
     enabled: false
 
-  data:
-    redis:
-      host: cms-redis
-      port: 6379
-      timeout: 2000ms
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=5000,expireAfterWrite=10m
 
   jackson:
     serialization:
@@ -58,20 +62,23 @@ server:
   port: 8080
 
 minio:
-  endpoint: ${MINIO_ENDPOINT:http://cms-minio:9000}
-  public-endpoint: ${MINIO_PUBLIC_ENDPOINT:}
-  access-key: ${MINIO_ACCESS_KEY:minioadmin}
-  secret-key: ${MINIO_SECRET_KEY:minioadmin}
-  region: us-east-1
+  enabled: false
+
+pg:
+  host: ${PG_HOST:localhost}
+  port: ${PG_PORT:5433}
+  db: ${PG_DB:cms_app}
+  user: ${PG_USER:cmsuser}
+  password: ${PG_PASSWORD:cmspassword}
 
 opensearch:
-  host: ${OPENSEARCH_HOST:cms-opensearch}
+  host: ${OPENSEARCH_HOST:localhost}
   port: ${OPENSEARCH_PORT:9200}
   scheme: http
   index-name: cms_files
 
 qdrant:
-  host: ${QDRANT_HOST:cms-qdrant}
+  host: ${QDRANT_HOST:localhost}
   port: ${QDRANT_PORT:6333}
   collection-name: document_chunks
 

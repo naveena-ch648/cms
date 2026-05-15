@@ -2,7 +2,6 @@
 
 import hashlib
 
-import boto3
 import pymysql
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
@@ -11,24 +10,11 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue
 from config import Config
 from processors.embedding_config import EmbeddingConfig
 from processors.ai_tagger import extract_text
+from processors.storage import get_object
 
 
-_s3_client = None
 _qdrant_client = None
 _embedding_model = None
-
-
-def get_s3_client():
-    global _s3_client
-    if _s3_client is None:
-        _s3_client = boto3.client(
-            "s3",
-            endpoint_url=Config.MINIO_ENDPOINT,
-            aws_access_key_id=Config.MINIO_ACCESS_KEY,
-            aws_secret_access_key=Config.MINIO_SECRET_KEY,
-            region_name=Config.MINIO_REGION,
-        )
-    return _s3_client
 
 
 def get_qdrant_client():
@@ -75,10 +61,8 @@ def process_duplicate_detection(file_id, org_id, storage_bucket, storage_key):
 
 def _check_exact_duplicate(file_id, org_id, storage_bucket, storage_key):
     """Check for exact duplicate by SHA-256 hash."""
-    s3 = get_s3_client()
     try:
-        response = s3.get_object(Bucket=storage_bucket, Key=storage_key)
-        content = response["Body"].read()
+        content = get_object(storage_bucket, storage_key)
         sha256 = hashlib.sha256(content).hexdigest()
     except Exception as e:
         print(f"Failed to compute SHA-256 for duplicate check: {e}")

@@ -10,7 +10,8 @@ import com.warrenstrange.googleauth.GoogleAuthenticatorQRGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,7 +22,6 @@ import java.util.List;
 import java.util.Optional;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class TwoFactorService {
 
@@ -30,8 +30,16 @@ public class TwoFactorService {
     private static final int BACKUP_CODE_LENGTH = 10;
 
     private final UserTwoFactorRepository twoFactorRepository;
-    private final StringRedisTemplate redisTemplate;
+    private final JdbcTemplate pgJdbc;
     private final JavaMailSenderWrapper mailWrapper;
+
+    public TwoFactorService(UserTwoFactorRepository twoFactorRepository,
+                            @Qualifier("pgJdbcTemplate") JdbcTemplate pgJdbc,
+                            JavaMailSenderWrapper mailWrapper) {
+        this.twoFactorRepository = twoFactorRepository;
+        this.pgJdbc = pgJdbc;
+        this.mailWrapper = mailWrapper;
+    }
 
     @Value("${two-factor.issuer}")
     private String issuer;
@@ -125,7 +133,11 @@ public class TwoFactorService {
     public void sendEmailOtp(User user) {
         String otp = generateNumericOtp(6);
         String key = EMAIL_OTP_PREFIX + user.getId();
-        redisTemplate.opsForValue().set(key, otp, Duration.ofSeconds(emailOtpTtlSeconds));
+        pgJdbc.update("""
+                INSERT INTO jwt_tokens (jti, token_type, value, expires_at)
+                VALUES (?, 'EMAIL_OTP', ?, NOW() + (? * INTERVAL '1 second'))
+                ON CONFLICT (jti) DO UPDATE SET value=EXCLUDED.value, expires_at=EXCLUDED.expires_at
+                """, key, otp, emailOtpTtlSeconds);
 
         try {
             mailWrapper.sendSimple(
@@ -164,9 +176,14 @@ public class TwoFactorService {
             }
             case EMAIL -> {
                 String key = EMAIL_OTP_PREFIX + user.getId();
-                String stored = redisTemplate.opsForValue().get(key);
+                String stored = null;
+                try {
+                    stored = pgJdbc.queryForObject(
+                        "SELECT value FROM jwt_tokens WHERE jti=? AND token_type='EMAIL_OTP' AND expires_at>NOW()",
+                        String.class, key);
+                } catch (Exception ignored) {}
                 if (stored != null && stored.equals(code.trim())) {
-                    redisTemplate.delete(key);
+                    pgJdbc.update("DELETE FROM jwt_tokens WHERE jti=?", key);
                     yield true;
                 }
                 yield false;

@@ -8,14 +8,12 @@ import com.cms.exception.ResourceNotFoundException;
 import com.cms.repository.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -27,7 +25,6 @@ public class FolderPermissionService {
     private final GroupRepository groupRepository;
     private final RoleRepository roleRepository;
     private final AuditService auditService;
-    private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
 
     private static final String PERM_CACHE_PREFIX = "folder_perm:";
@@ -112,26 +109,16 @@ public class FolderPermissionService {
     }
 
     public String getEffectiveRole(Long userId, Long folderId) {
-        String cacheKey = PERM_CACHE_PREFIX + userId + ":" + folderId;
-        String cached = redisTemplate.opsForValue().get(cacheKey);
-        if (cached != null) {
-            return cached;
-        }
-
         // Walk up ancestors looking for explicit permission
         Folder current = folderRepository.findById(folderId).orElse(null);
         while (current != null) {
             Optional<FolderPermission> perm = folderPermissionRepository
                     .findByFolderIdAndUserId(current.getId(), userId);
             if (perm.isPresent()) {
-                String roleName = perm.get().getRole().getName();
-                redisTemplate.opsForValue().set(cacheKey, roleName, PERM_CACHE_TTL_MINUTES, TimeUnit.MINUTES);
-                return roleName;
+                return perm.get().getRole().getName();
             }
             current = current.getParent();
         }
-
-        // No folder-specific permission found — returns null (caller falls back to workspace role)
         return null;
     }
 
@@ -197,6 +184,6 @@ public class FolderPermissionService {
     }
 
     private void invalidatePermCache(Long userId, Long folderId) {
-        redisTemplate.delete(PERM_CACHE_PREFIX + userId + ":" + folderId);
+        // No-op: caching removed
     }
 }

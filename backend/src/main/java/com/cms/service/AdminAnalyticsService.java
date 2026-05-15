@@ -11,7 +11,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,7 +28,6 @@ import java.util.List;
 public class AdminAnalyticsService {
 
     private static final String CACHE_KEY_PREFIX = "admin:analytics:";
-    private static final Duration CACHE_TTL = Duration.ofMinutes(5);
 
     private final UserRepository userRepository;
     private final FileRepository fileRepository;
@@ -37,32 +35,11 @@ public class AdminAnalyticsService {
     private final StorageQuotaRepository storageQuotaRepository;
     private final UserOrganizationRoleRepository userOrgRoleRepository;
     private final AuditEventRepository auditEventRepository;
-    private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
     public AdminAnalyticsResponse getAnalytics(Long organizationId, int days) {
-        String cacheKey = CACHE_KEY_PREFIX + organizationId + ":" + days;
-
-        try {
-            String cached = redisTemplate.opsForValue().get(cacheKey);
-            if (cached != null) {
-                return objectMapper.readValue(cached, AdminAnalyticsResponse.class);
-            }
-        } catch (Exception e) {
-            log.warn("Failed to read analytics cache: {}", e.getMessage());
-        }
-
-        AdminAnalyticsResponse response = buildAnalytics(organizationId, days);
-
-        try {
-            String json = objectMapper.writeValueAsString(response);
-            redisTemplate.opsForValue().set(cacheKey, json, CACHE_TTL);
-        } catch (Exception e) {
-            log.warn("Failed to cache analytics: {}", e.getMessage());
-        }
-
-        return response;
+        return buildAnalytics(organizationId, days);
     }
 
     private AdminAnalyticsResponse buildAnalytics(Long organizationId, int days) {

@@ -11,7 +11,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,7 +19,6 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -38,7 +36,6 @@ public class SharedLinkService {
     private final StorageService storageService;
     private final AuditService auditService;
     private final PasswordEncoder passwordEncoder;
-    private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
     private final ActivityEventService activityEventService;
 
@@ -128,33 +125,9 @@ public class SharedLinkService {
     }
 
     public SharedLink accessLink(String token) {
-        // Check Redis cache first
-        String cacheKey = SHARE_CACHE_PREFIX + token;
-        String cached = redisTemplate.opsForValue().get(cacheKey);
-        if (cached != null) {
-            try {
-                // Cache hit — still validate status
-                SharedLink link = sharedLinkRepository.findByToken(token)
-                        .orElseThrow(() -> new ResourceNotFoundException("Share link not found"));
-                validateLinkAccess(link);
-                return link;
-            } catch (Exception e) {
-                redisTemplate.delete(cacheKey);
-                throw e;
-            }
-        }
-
         SharedLink link = sharedLinkRepository.findByToken(token)
                 .orElseThrow(() -> new ResourceNotFoundException("Share link not found"));
-
         validateLinkAccess(link);
-
-        // Cache the token validation
-        try {
-            redisTemplate.opsForValue().set(cacheKey, "valid", SHARE_CACHE_TTL_MINUTES, TimeUnit.MINUTES);
-        } catch (Exception ignored) {
-        }
-
         return link;
     }
 
@@ -199,9 +172,6 @@ public class SharedLinkService {
 
         link.setStatus(SharedLink.LinkStatus.REVOKED);
         sharedLinkRepository.save(link);
-
-        // Invalidate cache
-        redisTemplate.delete(SHARE_CACHE_PREFIX + link.getToken());
 
         auditService.log(link.getWorkspace().getOrganization(), link.getCreatedBy(),
                 "SHARE_LINK_REVOKED", "SharedLink", link.getId(),
@@ -264,9 +234,6 @@ public class SharedLinkService {
         }
 
         link = sharedLinkRepository.save(link);
-
-        // Invalidate cache
-        redisTemplate.delete(SHARE_CACHE_PREFIX + link.getToken());
 
         return link;
     }

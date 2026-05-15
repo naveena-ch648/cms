@@ -78,7 +78,7 @@ public class FileShareService {
         }
 
         // Check for existing share record
-        var existing = fileShareRepository.findByFileIdAndSharedWithUserId(
+        var existing = fileShareRepository.findByFileIdAndSharedWithId(
                 file.getId(), sharedWith.getId());
 
         if (existing.isPresent()) {

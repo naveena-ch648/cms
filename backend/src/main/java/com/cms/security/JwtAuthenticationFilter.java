@@ -4,9 +4,9 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -19,14 +19,21 @@ import java.io.IOException;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtProvider jwtProvider;
     private final CustomUserDetailsService userDetailsService;
-    private final RedisTemplate<String, String> redisTemplate;
+    private final JdbcTemplate pgJdbc;
 
     private static final String BLOCKLIST_PREFIX = "jwt:blocklist:";
+
+    public JwtAuthenticationFilter(JwtProvider jwtProvider,
+                                    CustomUserDetailsService userDetailsService,
+                                    @Qualifier("pgJdbcTemplate") JdbcTemplate pgJdbc) {
+        this.jwtProvider = jwtProvider;
+        this.userDetailsService = userDetailsService;
+        this.pgJdbc = pgJdbc;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -36,15 +43,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (token != null && jwtProvider.validateToken(token)) {
             String jti = jwtProvider.getTokenId(token);
 
-            // Check Redis blocklist (skip gracefully if Redis is unavailable)
+            // Check PostgreSQL blocklist
             try {
-                Boolean blocked = redisTemplate.hasKey(BLOCKLIST_PREFIX + jti);
-                if (Boolean.TRUE.equals(blocked)) {
+                Integer count = pgJdbc.queryForObject(
+                    "SELECT COUNT(*) FROM jwt_tokens WHERE jti=? AND token_type='BLOCKLIST' AND expires_at>NOW()",
+                    Integer.class, BLOCKLIST_PREFIX + jti);
+                if (count != null && count > 0) {
                     filterChain.doFilter(request, response);
                     return;
                 }
             } catch (Exception e) {
-                log.warn("Redis unavailable — JWT blocklist check skipped: {}", e.getMessage());
+                log.warn("PG unavailable — JWT blocklist check skipped: {}", e.getMessage());
             }
 
             Long userId = jwtProvider.getUserId(token);

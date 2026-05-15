@@ -6,26 +6,16 @@ import subprocess
 import tempfile
 import uuid
 
-import boto3
 import pymysql
 from PIL import Image
 from pdf2image import convert_from_path
 
 from config import Config
+from processors.storage import get_object, put_object
 
 THUMBNAIL_SIZE = (256, 256)
 PREVIEW_DPI = 150
 MAX_PAGES = 100
-
-
-def get_s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=Config.MINIO_ENDPOINT,
-        aws_access_key_id=Config.MINIO_ACCESS_KEY,
-        aws_secret_access_key=Config.MINIO_SECRET_KEY,
-        region_name=Config.MINIO_REGION,
-    )
 
 
 def get_db_connection():
@@ -61,7 +51,6 @@ def _convert_to_pdf(input_path: str, output_dir: str) -> str:
 def process_office_preview(file_id: str, org_id: str, storage_bucket: str, storage_key: str):
     """Convert Office doc to PDF, then render pages as images. Also generates thumbnail."""
     conn = get_db_connection()
-    s3 = get_s3_client()
 
     try:
         with conn.cursor() as cur:
@@ -80,9 +69,8 @@ def process_office_preview(file_id: str, org_id: str, storage_bucket: str, stora
             )
             conn.commit()
 
-        # Download file from MinIO
-        response = s3.get_object(Bucket=storage_bucket, Key=storage_key)
-        file_data = response["Body"].read()
+        # Download file from PostgreSQL storage
+        file_data = get_object(storage_bucket, storage_key)
 
         # Determine extension from storage key
         ext = os.path.splitext(storage_key)[1] or ".docx"
@@ -111,12 +99,7 @@ def process_office_preview(file_id: str, org_id: str, storage_bucket: str, stora
             thumb_buffer.seek(0)
 
             thumb_key = f"thumbnails/{file_id}/thumbnail.jpg"
-            s3.put_object(
-                Bucket=storage_bucket,
-                Key=thumb_key,
-                Body=thumb_buffer.getvalue(),
-                ContentType="image/jpeg",
-            )
+            put_object(storage_bucket, thumb_key, thumb_buffer.getvalue(), "image/jpeg")
 
             # Upload page images
             key_prefix = f"previews/{file_id}"
@@ -132,12 +115,7 @@ def process_office_preview(file_id: str, org_id: str, storage_bucket: str, stora
                 total_size += page_size
 
                 page_key = f"{key_prefix}/page-{i}.png"
-                s3.put_object(
-                    Bucket=storage_bucket,
-                    Key=page_key,
-                    Body=page_buffer.getvalue(),
-                    ContentType="image/png",
-                )
+                put_object(storage_bucket, page_key, page_buffer.getvalue(), "image/png")
 
             # Update DB records
             with conn.cursor() as cur:

@@ -11,8 +11,6 @@ import com.cms.repository.UserRepository;
 import com.cms.repository.WorkspaceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,7 +26,6 @@ public class TagService {
     private final FileRepository fileRepository;
     private final UserRepository userRepository;
     private final WorkspaceRepository workspaceRepository;
-    private final RedisTemplate<String, String> redisTemplate;
     private final SearchIndexService searchIndexService;
 
     private static final String AUTOCOMPLETE_KEY_PREFIX = "tags:autocomplete:workspace:";
@@ -140,27 +137,18 @@ public class TagService {
     }
 
     public List<String> autocomplete(Long workspaceId, String prefix, int limit) {
-        String key = AUTOCOMPLETE_KEY_PREFIX + workspaceId;
         String normalizedPrefix = prefix != null ? prefix.trim().toLowerCase() : "";
-
-        Set<String> results = redisTemplate.opsForZSet()
-                .rangeByLex(key,
-                        org.springframework.data.redis.connection.RedisZSetCommands.Range.range()
-                                .gte(normalizedPrefix)
-                                .lte(normalizedPrefix + "\uffff"));
-
-        if (results == null || results.isEmpty()) {
-            return List.of();
-        }
-
-        return results.stream()
+        List<FileTag> tags = fileTagRepository.findDistinctByWorkspaceIdOrderByName(workspaceId);
+        return tags.stream()
+                .map(FileTag::getName)
+                .filter(name -> normalizedPrefix.isEmpty() || name.startsWith(normalizedPrefix))
+                .distinct()
                 .limit(Math.min(limit, 50))
                 .collect(Collectors.toList());
     }
 
     private void addToAutocomplete(Long workspaceId, String tagName) {
-        String key = AUTOCOMPLETE_KEY_PREFIX + workspaceId;
-        redisTemplate.opsForZSet().add(key, tagName, 0);
+        // No-op: autocomplete now done via DB query
     }
 
     private void updateSearchIndex(FileEntity file) {

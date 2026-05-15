@@ -1,4 +1,4 @@
-"""Webhook delivery worker — processes webhook:deliver Redis queue."""
+"""Webhook delivery worker — processes webhook:deliver queue from PostgreSQL."""
 
 import hashlib
 import hmac
@@ -6,8 +6,8 @@ import json
 import time
 from datetime import datetime
 
+import psycopg2
 import pymysql
-import redis
 import urllib.request
 import urllib.error
 
@@ -123,23 +123,35 @@ def deliver_webhook(delivery_data: dict, db):
     return status
 
 
-def run_webhook_worker(r: redis.Redis, running_flag):
+def run_webhook_worker(conn, running_flag):
     """Main loop for the webhook delivery worker."""
-    print("[WEBHOOK] Delivery worker started, waiting for deliveries...")
+    print("[WEBHOOK] Delivery worker started, polling for deliveries...")
     db = get_db_connection()
 
     while running_flag():
         try:
-            job_json = r.rpop("webhook:deliver")
-            if job_json:
-                delivery_data = json.loads(job_json)
-                event_type = delivery_data.get("eventType", "unknown")
-                url = delivery_data.get("url", "unknown")
-                print(f"[WEBHOOK] Delivering {event_type} to {url}")
-                status = deliver_webhook(delivery_data, db)
-                print(f"[WEBHOOK] Delivery result: {status}")
+            job = _claim_job(conn, ["webhook:deliver"])
+            if job:
+                job_id, _queue, payload, _retries = job
+                try:
+                    delivery_data = json.loads(payload)
+                    event_type = delivery_data.get("eventType", "unknown")
+                    url = delivery_data.get("url", "unknown")
+                    print(f"[WEBHOOK] Delivering {event_type} to {url}")
+                    deliver_webhook(delivery_data, db)
+                    _ack_job(conn, job_id)
+                except Exception as e:
+                    print(f"[WEBHOOK] Delivery error: {e}")
+                    _ack_job(conn, job_id)  # Don't retry webhook deliveries
             else:
-                time.sleep(1)
+                time.sleep(Config.POLL_INTERVAL)
+        except psycopg2.OperationalError:
+            print("[WEBHOOK] PG connection lost, reconnecting...")
+            time.sleep(5)
+            try:
+                conn = _get_pg_conn()
+            except Exception:
+                pass
         except pymysql.err.OperationalError:
             print("[WEBHOOK] DB connection lost, reconnecting...")
             try:
@@ -150,3 +162,36 @@ def run_webhook_worker(r: redis.Redis, running_flag):
         except Exception as e:
             print(f"[WEBHOOK] Error: {e}")
             time.sleep(1)
+
+
+def _get_pg_conn():
+    return psycopg2.connect(
+        host=Config.PG_HOST,
+        port=Config.PG_PORT,
+        dbname=Config.PG_DB,
+        user=Config.PG_USER,
+        password=Config.PG_PASSWORD,
+    )
+
+
+def _claim_job(conn, queue_names):
+    with conn.cursor() as cur:
+        cur.execute(
+            """UPDATE job_queue SET status='PROCESSING', updated_at=NOW()
+               WHERE id = (
+                   SELECT id FROM job_queue
+                   WHERE queue_name = ANY(%s) AND status='PENDING'
+                     AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
+                   ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED
+               ) RETURNING id, queue_name, payload, retry_count""",
+            (queue_names,),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return row
+
+
+def _ack_job(conn, job_id):
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM job_queue WHERE id = %s", (job_id,))
+    conn.commit()

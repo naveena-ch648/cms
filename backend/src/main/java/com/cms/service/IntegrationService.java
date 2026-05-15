@@ -8,25 +8,39 @@ import com.cms.security.UserPrincipal;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class IntegrationService {
 
     private final IntegrationConnectionRepository connectionRepository;
     private final FolderRepository folderRepository;
     private final IntegrationTokenEncryptor tokenEncryptor;
-    private final StringRedisTemplate redisTemplate;
+    private final JobQueueService jobQueueService;
+    private final JdbcTemplate pgJdbc;
     private final ObjectMapper objectMapper;
+
+    public IntegrationService(IntegrationConnectionRepository connectionRepository,
+                              FolderRepository folderRepository,
+                              IntegrationTokenEncryptor tokenEncryptor,
+                              JobQueueService jobQueueService,
+                              @Qualifier("pgJdbcTemplate") JdbcTemplate pgJdbc,
+                              ObjectMapper objectMapper) {
+        this.connectionRepository = connectionRepository;
+        this.folderRepository = folderRepository;
+        this.tokenEncryptor = tokenEncryptor;
+        this.jobQueueService = jobQueueService;
+        this.pgJdbc = pgJdbc;
+        this.objectMapper = objectMapper;
+    }
 
     @Value("${google.drive.client-id}")
     private String googleClientId;
@@ -44,10 +58,14 @@ public class IntegrationService {
 
     public String generateAuthorizationUrl(UserPrincipal user) {
         String state = UUID.randomUUID().toString();
-        // Store state in Redis with 10-minute TTL for CSRF protection
+        // Store state in PostgreSQL with 10-minute TTL for CSRF protection
         String stateKey = OAUTH_STATE_PREFIX + state;
         String stateValue = user.getId() + ":" + TenantContext.getCurrentTenant();
-        redisTemplate.opsForValue().set(stateKey, stateValue, 10, TimeUnit.MINUTES);
+        pgJdbc.update("""
+                INSERT INTO jwt_tokens (jti, token_type, value, expires_at)
+                VALUES (?, 'OAUTH_STATE', ?, NOW() + INTERVAL '10 minutes')
+                ON CONFLICT (jti) DO UPDATE SET value=EXCLUDED.value, expires_at=EXCLUDED.expires_at
+                """, stateKey, stateValue);
 
         return GOOGLE_AUTH_URL +
                 "?client_id=" + googleClientId +
@@ -63,11 +81,16 @@ public class IntegrationService {
     public ConnectionResponse handleOAuthCallback(String code, String state, UserPrincipal user) {
         // Validate state parameter
         String stateKey = OAUTH_STATE_PREFIX + state;
-        String stateValue = redisTemplate.opsForValue().get(stateKey);
+        String stateValue = null;
+        try {
+            stateValue = pgJdbc.queryForObject(
+                "SELECT value FROM jwt_tokens WHERE jti=? AND token_type='OAUTH_STATE' AND expires_at>NOW()",
+                String.class, stateKey);
+        } catch (Exception ignored) {}
         if (stateValue == null) {
             throw new IllegalArgumentException("Invalid or expired OAuth state");
         }
-        redisTemplate.delete(stateKey);
+        pgJdbc.update("DELETE FROM jwt_tokens WHERE jti=?", stateKey);
 
         // Exchange code for tokens (simulated — in production would call Google Token endpoint)
         Map<String, String> tokens = exchangeCodeForTokens(code);
@@ -201,17 +224,14 @@ public class IntegrationService {
             jobData.put("refreshToken", tokenEncryptor.decrypt(connection.getRefreshTokenEncrypted()));
 
             String json = objectMapper.writeValueAsString(jobData);
-            redisTemplate.opsForList().leftPush("integration:import", json);
+            jobQueueService.push("integration:import", json);
 
-            // Store job status in Redis
-            Map<String, String> status = new HashMap<>();
-            status.put("status", "QUEUED");
-            status.put("totalItems", String.valueOf(request.getDriveFileIds().size()));
-            status.put("completedItems", "0");
-            status.put("failedItems", "0");
-            status.put("startedAt", Instant.now().toString());
-            redisTemplate.opsForHash().putAll("integration:job:" + jobId, status);
-            redisTemplate.expire("integration:job:" + jobId, 24, TimeUnit.HOURS);
+            // Store job status in PostgreSQL
+            upsertJobState(jobId, "status", "QUEUED");
+            upsertJobState(jobId, "totalItems", String.valueOf(request.getDriveFileIds().size()));
+            upsertJobState(jobId, "completedItems", "0");
+            upsertJobState(jobId, "failedItems", "0");
+            upsertJobState(jobId, "startedAt", Instant.now().toString());
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to queue import job", e);
@@ -250,16 +270,13 @@ public class IntegrationService {
             jobData.put("refreshToken", tokenEncryptor.decrypt(connection.getRefreshTokenEncrypted()));
 
             String json = objectMapper.writeValueAsString(jobData);
-            redisTemplate.opsForList().leftPush("integration:export", json);
+            jobQueueService.push("integration:export", json);
 
-            Map<String, String> status = new HashMap<>();
-            status.put("status", "QUEUED");
-            status.put("totalItems", String.valueOf(request.getFileIds().size()));
-            status.put("completedItems", "0");
-            status.put("failedItems", "0");
-            status.put("startedAt", Instant.now().toString());
-            redisTemplate.opsForHash().putAll("integration:job:" + jobId, status);
-            redisTemplate.expire("integration:job:" + jobId, 24, TimeUnit.HOURS);
+            upsertJobState(jobId, "status", "QUEUED");
+            upsertJobState(jobId, "totalItems", String.valueOf(request.getFileIds().size()));
+            upsertJobState(jobId, "completedItems", "0");
+            upsertJobState(jobId, "failedItems", "0");
+            upsertJobState(jobId, "startedAt", Instant.now().toString());
         } catch (Exception e) {
             throw new RuntimeException("Failed to queue export job", e);
         }
@@ -273,14 +290,23 @@ public class IntegrationService {
     }
 
     public Map<String, String> getJobStatus(String jobId) {
-        Map<Object, Object> entries = redisTemplate.opsForHash().entries("integration:job:" + jobId);
-        if (entries.isEmpty()) {
-            throw new NoSuchElementException("Job not found");
+        List<Map<String, Object>> rows = pgJdbc.queryForList(
+                "SELECT field, value FROM integration_job_state WHERE job_id=?", jobId);
+        if (rows.isEmpty()) {
+            throw new java.util.NoSuchElementException("Job not found");
         }
         Map<String, String> result = new HashMap<>();
-        entries.forEach((k, v) -> result.put(k.toString(), v.toString()));
+        rows.forEach(r -> result.put((String) r.get("field"), (String) r.get("value")));
         result.put("id", jobId);
         return result;
+    }
+
+    private void upsertJobState(String jobId, String field, String value) {
+        pgJdbc.update("""
+                INSERT INTO integration_job_state (job_id, field, value)
+                VALUES (?, ?, ?)
+                ON CONFLICT (job_id, field) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()
+                """, jobId, field, value);
     }
 
     private Map<String, String> exchangeCodeForTokens(String code) {

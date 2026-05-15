@@ -9,7 +9,6 @@ import com.cms.repository.PreviewJobRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,7 +23,7 @@ public class PreviewJobDispatcher {
 
     private static final String QUEUE_NAME = "file:process";
 
-    private final RedisTemplate<String, String> redisTemplate;
+    private final JobQueueService jobQueueService;
     private final ObjectMapper objectMapper;
     private final PreviewJobRepository previewJobRepository;
 
@@ -67,9 +66,9 @@ public class PreviewJobDispatcher {
             message.put("_retries", 0);
 
             String payload = objectMapper.writeValueAsString(message);
-            redisTemplate.opsForList().leftPush(QUEUE_NAME, payload);
+            jobQueueService.push(QUEUE_NAME, payload);
         } catch (Exception e) {
-            log.error("Failed to publish preview job to Redis queue for fileId={}", file.getUuid(), e);
+            log.error("Failed to publish preview job to queue for fileId={}", file.getUuid(), e);
         }
     }
 }

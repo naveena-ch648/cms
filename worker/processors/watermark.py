@@ -3,25 +3,15 @@
 import io
 import tempfile
 
-import boto3
 import pymysql
 from PIL import Image, ImageDraw, ImageFont
 
 from config import Config
+from processors.storage import get_object, put_object
 
-WATERMARK_OPACITY = 80  # 0-255
+WATERMARK_OPACITY = 80
 WATERMARK_ANGLE = -45
 WATERMARK_FONT_SIZE = 36
-
-
-def get_s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=Config.MINIO_ENDPOINT,
-        aws_access_key_id=Config.MINIO_ACCESS_KEY,
-        aws_secret_access_key=Config.MINIO_SECRET_KEY,
-        region_name=Config.MINIO_REGION,
-    )
 
 
 def get_db_connection():
@@ -55,23 +45,15 @@ def process_watermark(file_id: str, link_token: str, org_id: str):
             print(f"Watermark only supports images, skipping mime_type={mime_type}")
             return
 
-        s3 = get_s3_client()
-
         # Download original image
-        response = s3.get_object(Bucket=bucket, Key=key)
-        image_data = response["Body"].read()
+        image_data = get_object(bucket, key)
 
         # Apply watermark
         watermarked = apply_watermark(image_data, link_token)
 
         # Upload watermarked version
         watermark_key = f"watermarked/{link_token}/{key.split('/')[-1]}"
-        s3.put_object(
-            Bucket=bucket,
-            Key=watermark_key,
-            Body=watermarked,
-            ContentType=mime_type,
-        )
+        put_object(bucket, watermark_key, watermarked, mime_type)
 
         # Update shared_links with watermarked key (optional metadata)
         print(f"Watermarked file stored at {bucket}/{watermark_key}")

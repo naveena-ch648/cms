@@ -10,10 +10,10 @@ import com.cms.entity.User;
 import com.cms.repository.FolderRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -21,10 +21,8 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class FileUploadService {
 
@@ -32,7 +30,7 @@ public class FileUploadService {
     private final StorageQuotaService storageQuotaService;
     private final FileService fileService;
     private final FolderRepository folderRepository;
-    private final RedisTemplate<String, String> redisTemplate;
+    private final JdbcTemplate pgJdbc;
     private final ObjectMapper objectMapper;
 
     @Value("${file-upload.default-chunk-size:5242880}")
@@ -41,7 +39,19 @@ public class FileUploadService {
     @Value("${file-upload.session-ttl-hours:24}")
     private int sessionTtlHours;
 
-    private static final String SESSION_PREFIX = "upload_session:";
+    public FileUploadService(StorageService storageService,
+                             StorageQuotaService storageQuotaService,
+                             FileService fileService,
+                             FolderRepository folderRepository,
+                             @Qualifier("pgJdbcTemplate") JdbcTemplate pgJdbc,
+                             ObjectMapper objectMapper) {
+        this.storageService = storageService;
+        this.storageQuotaService = storageQuotaService;
+        this.fileService = fileService;
+        this.folderRepository = folderRepository;
+        this.pgJdbc = pgJdbc;
+        this.objectMapper = objectMapper;
+    }
 
     public FileEntity uploadSingleFile(MultipartFile file, String folderUuid, String description,
                                        String tags, String onDuplicate, User uploader) throws IOException {
@@ -50,22 +60,18 @@ public class FileUploadService {
 
         Long orgId = folder.getWorkspace().getOrganization().getId();
 
-        // Validate
         storageQuotaService.validateFileSize(orgId, file.getSize());
         storageQuotaService.validateFileExtension(orgId, file.getOriginalFilename());
         if (!storageQuotaService.checkQuotaAvailable(orgId, file.getSize())) {
             throw new IllegalStateException("Storage quota exceeded");
         }
 
-        // Generate storage key
         String bucket = "cms-" + folder.getWorkspace().getOrganization().getId();
         String fileUuid = UUID.randomUUID().toString();
         String storageKey = folder.getWorkspace().getId() + "/" + folder.getUuid() + "/" + fileUuid + "_" + file.getOriginalFilename();
 
-        // Upload to MinIO
         storageService.putObject(bucket, storageKey, file.getInputStream(), file.getSize(), file.getContentType());
 
-        // Create file record
         return fileService.createFileRecord(folder, uploader, file.getOriginalFilename(),
                 file.getOriginalFilename(), file.getSize(), file.getContentType(),
                 storageKey, bucket, description, tags, onDuplicate);
@@ -90,78 +96,54 @@ public class FileUploadService {
         String fileUuid = UUID.randomUUID().toString();
         String storageKey = folder.getWorkspace().getId() + "/" + folder.getUuid() + "/" + fileUuid + "_" + request.getFileName();
 
-        // Initiate S3 multipart upload
-        String s3UploadId = storageService.initiateMultipartUpload(bucket, storageKey, request.getMimeType());
-
-        // Store session in Redis
         String sessionId = UUID.randomUUID().toString();
-        Map<String, String> session = new HashMap<>();
-        session.put("sessionId", sessionId);
-        session.put("fileName", request.getFileName());
-        session.put("folderId", String.valueOf(folder.getId()));
-        session.put("folderUuid", folder.getUuid());
-        session.put("organizationId", String.valueOf(orgId));
-        session.put("workspaceId", String.valueOf(folder.getWorkspace().getId()));
-        session.put("uploadedBy", String.valueOf(uploader.getId()));
-        session.put("totalSize", String.valueOf(request.getFileSize()));
-        session.put("chunkSize", String.valueOf(chunkSize));
-        session.put("totalChunks", String.valueOf(totalChunks));
-        session.put("completedChunks", "[]");
-        session.put("s3UploadId", s3UploadId);
-        session.put("s3Bucket", bucket);
-        session.put("s3Key", storageKey);
-        session.put("mimeType", request.getMimeType());
-        session.put("status", "INITIATED");
-        session.put("description", request.getDescription() != null ? request.getDescription() : "");
-        session.put("tags", request.getTags() != null ? request.getTags() : "[]");
-        session.put("onDuplicate", request.getOnDuplicate() != null ? request.getOnDuplicate() : "rename");
-        session.put("createdAt", Instant.now().toString());
-        session.put("lastActivityAt", Instant.now().toString());
+        Instant expiresAt = Instant.now().plus(Duration.ofHours(sessionTtlHours));
 
-        String key = SESSION_PREFIX + sessionId;
-        redisTemplate.opsForHash().putAll(key, session);
-        redisTemplate.expire(key, sessionTtlHours, TimeUnit.HOURS);
+        pgJdbc.update("""
+                INSERT INTO upload_sessions (session_id, file_name, folder_id, folder_uuid,
+                    organization_id, workspace_id, uploaded_by, total_size, chunk_size, total_chunks,
+                    mime_type, bucket, storage_key, description, tags, on_duplicate, expires_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                sessionId, request.getFileName(), folder.getId(), folder.getUuid(),
+                orgId, folder.getWorkspace().getId(), uploader.getId(),
+                request.getFileSize(), chunkSize, totalChunks,
+                request.getMimeType(), bucket, storageKey,
+                request.getDescription() != null ? request.getDescription() : "",
+                request.getTags() != null ? request.getTags() : "[]",
+                request.getOnDuplicate() != null ? request.getOnDuplicate() : "rename",
+                java.sql.Timestamp.from(expiresAt));
 
         return UploadInitiateResponse.builder()
                 .sessionId(sessionId)
                 .chunkSize(chunkSize)
                 .totalChunks(totalChunks)
-                .expiresAt(Instant.now().plus(Duration.ofHours(sessionTtlHours)))
+                .expiresAt(expiresAt)
                 .build();
     }
 
-    public ChunkUploadResponse uploadChunk(String sessionId, int chunkNumber,
-                                           byte[] data) throws IOException {
-        String key = SESSION_PREFIX + sessionId;
-        Map<Object, Object> session = redisTemplate.opsForHash().entries(key);
-        if (session.isEmpty()) {
-            throw new IllegalArgumentException("Upload session not found or expired");
-        }
+    public ChunkUploadResponse uploadChunk(String sessionId, int chunkNumber, byte[] data) throws IOException {
+        Map<String, Object> session = getSession(sessionId);
+        int totalChunks = ((Number) session.get("total_chunks")).intValue();
 
-        int totalChunks = Integer.parseInt((String) session.get("totalChunks"));
         if (chunkNumber < 0 || chunkNumber >= totalChunks) {
             throw new IllegalArgumentException("Invalid chunk number: " + chunkNumber);
         }
 
-        String bucket = (String) session.get("s3Bucket");
-        String storageKey = (String) session.get("s3Key");
-        String uploadId = (String) session.get("s3UploadId");
+        String etag = Integer.toHexString(Arrays.hashCode(data));
 
-        // Upload part to S3 (part numbers are 1-based)
-        String etag = storageService.uploadPart(bucket, storageKey, uploadId, chunkNumber + 1,
-                new java.io.ByteArrayInputStream(data), data.length);
+        pgJdbc.update("""
+                INSERT INTO upload_session_parts (session_id, chunk_number, etag, data)
+                VALUES (?,?,?,?)
+                ON CONFLICT (session_id, chunk_number) DO UPDATE SET etag=EXCLUDED.etag, data=EXCLUDED.data
+                """, sessionId, chunkNumber, etag, data);
 
-        // Update completed chunks
-        List<Integer> completed = parseCompletedChunks((String) session.get("completedChunks"));
-        if (!completed.contains(chunkNumber)) {
-            completed.add(chunkNumber);
-        }
+        List<Integer> completed = getCompletedChunks(sessionId, totalChunks);
 
-        redisTemplate.opsForHash().put(key, "completedChunks", objectMapper.writeValueAsString(completed));
-        redisTemplate.opsForHash().put(key, "status", "IN_PROGRESS");
-        redisTemplate.opsForHash().put(key, "lastActivityAt", Instant.now().toString());
-        // Store etag for part
-        redisTemplate.opsForHash().put(key, "etag_" + chunkNumber, etag);
+        pgJdbc.update("""
+                UPDATE upload_sessions SET status='IN_PROGRESS',
+                    completed_chunks=?, last_activity_at=NOW() WHERE session_id=?
+                """, toJson(completed), sessionId);
 
         return ChunkUploadResponse.builder()
                 .chunkNumber(chunkNumber)
@@ -172,107 +154,111 @@ public class FileUploadService {
     }
 
     public FileEntity completeChunkedUpload(String sessionId, String checksumSha256, User uploader) {
-        String key = SESSION_PREFIX + sessionId;
-        Map<Object, Object> session = redisTemplate.opsForHash().entries(key);
-        if (session.isEmpty()) {
-            throw new IllegalArgumentException("Upload session not found or expired");
-        }
-
-        int totalChunks = Integer.parseInt((String) session.get("totalChunks"));
-        List<Integer> completed = parseCompletedChunks((String) session.get("completedChunks"));
+        Map<String, Object> session = getSession(sessionId);
+        int totalChunks = ((Number) session.get("total_chunks")).intValue();
+        List<Integer> completed = getCompletedChunks(sessionId, totalChunks);
 
         if (completed.size() != totalChunks) {
             throw new IllegalStateException("Not all chunks uploaded. Expected " + totalChunks + ", got " + completed.size());
         }
 
-        String bucket = (String) session.get("s3Bucket");
-        String storageKey = (String) session.get("s3Key");
-        String uploadId = (String) session.get("s3UploadId");
+        String bucket = (String) session.get("bucket");
+        String storageKey = (String) session.get("storage_key");
+        String mimeType = (String) session.get("mime_type");
+        long totalSize = ((Number) session.get("total_size")).longValue();
 
-        // Build completed parts list
-        List<software.amazon.awssdk.services.s3.model.CompletedPart> parts = new ArrayList<>();
+        // Assemble all chunk bytes in order
+        List<byte[]> parts = new ArrayList<>();
         for (int i = 0; i < totalChunks; i++) {
-            String etag = (String) redisTemplate.opsForHash().get(key, "etag_" + i);
-            parts.add(software.amazon.awssdk.services.s3.model.CompletedPart.builder()
-                    .partNumber(i + 1)
-                    .eTag(etag)
-                    .build());
+            byte[] chunk = pgJdbc.queryForObject(
+                    "SELECT data FROM upload_session_parts WHERE session_id=? AND chunk_number=?",
+                    byte[].class, sessionId, i);
+            if (chunk == null) throw new IllegalStateException("Missing chunk " + i);
+            parts.add(chunk);
         }
 
-        // Complete S3 multipart
-        storageService.completeMultipartUpload(bucket, storageKey, uploadId, parts);
+        // Concatenate and store
+        byte[] assembled = assembleChunks(parts);
+        storageService.putObject(bucket, storageKey,
+                new java.io.ByteArrayInputStream(assembled), assembled.length, mimeType);
 
-        // Create file record
-        Folder folder = folderRepository.findById(Long.parseLong((String) session.get("folderId")))
-                .orElseThrow();
+        Folder folder = folderRepository.findById(((Number) session.get("folder_id")).longValue()).orElseThrow();
 
+        String description = (String) session.get("description");
         FileEntity file = fileService.createFileRecord(
                 folder, uploader,
-                (String) session.get("fileName"),
-                (String) session.get("fileName"),
-                Long.parseLong((String) session.get("totalSize")),
-                (String) session.get("mimeType"),
-                storageKey, bucket,
-                ((String) session.get("description")).isEmpty() ? null : (String) session.get("description"),
+                (String) session.get("file_name"),
+                (String) session.get("file_name"),
+                totalSize, mimeType, storageKey, bucket,
+                (description == null || description.isEmpty()) ? null : description,
                 (String) session.get("tags"),
-                (String) session.get("onDuplicate"));
+                (String) session.get("on_duplicate"));
 
         if (checksumSha256 != null && !checksumSha256.isBlank()) {
             file.setChecksumSha256(checksumSha256);
         }
 
-        // Cleanup Redis session
-        redisTemplate.delete(key);
-
+        cleanupSession(sessionId);
         return file;
     }
 
     public void abortUpload(String sessionId) {
-        String key = SESSION_PREFIX + sessionId;
-        Map<Object, Object> session = redisTemplate.opsForHash().entries(key);
-        if (session.isEmpty()) {
-            return;
-        }
-
-        String bucket = (String) session.get("s3Bucket");
-        String storageKey = (String) session.get("s3Key");
-        String uploadId = (String) session.get("s3UploadId");
-
-        storageService.abortMultipartUpload(bucket, storageKey, uploadId);
-        redisTemplate.delete(key);
+        cleanupSession(sessionId);
     }
 
     public UploadSessionStatusDto getSessionStatus(String sessionId) {
-        String key = SESSION_PREFIX + sessionId;
-        Map<Object, Object> session = redisTemplate.opsForHash().entries(key);
-        if (session.isEmpty()) {
-            throw new IllegalArgumentException("Upload session not found or expired");
-        }
-
-        int totalChunks = Integer.parseInt((String) session.get("totalChunks"));
-        List<Integer> completed = parseCompletedChunks((String) session.get("completedChunks"));
+        Map<String, Object> session = getSession(sessionId);
+        int totalChunks = ((Number) session.get("total_chunks")).intValue();
+        List<Integer> completed = getCompletedChunks(sessionId, totalChunks);
         double percent = totalChunks > 0 ? (double) completed.size() / totalChunks * 100.0 : 0;
+
+        Instant createdAt = ((java.sql.Timestamp) session.get("created_at")).toInstant();
+        Instant lastActivity = ((java.sql.Timestamp) session.get("last_activity_at")).toInstant();
 
         return UploadSessionStatusDto.builder()
                 .sessionId(sessionId)
-                .fileName((String) session.get("fileName"))
+                .fileName((String) session.get("file_name"))
                 .totalChunks(totalChunks)
                 .completedChunks(completed.size())
                 .percentComplete(Math.round(percent * 10.0) / 10.0)
                 .status((String) session.get("status"))
-                .expiresAt(Instant.parse((String) session.get("createdAt")).plus(Duration.ofHours(sessionTtlHours)))
-                .lastActivityAt(Instant.parse((String) session.get("lastActivityAt")))
+                .expiresAt(createdAt.plus(Duration.ofHours(sessionTtlHours)))
+                .lastActivityAt(lastActivity)
                 .build();
     }
 
-    private List<Integer> parseCompletedChunks(String json) {
-        if (json == null || json.isBlank() || "[]".equals(json)) {
-            return new ArrayList<>();
+    // ──────── helpers ────────
+
+    private Map<String, Object> getSession(String sessionId) {
+        List<Map<String, Object>> rows = pgJdbc.queryForList(
+                "SELECT * FROM upload_sessions WHERE session_id=? AND expires_at > NOW()", sessionId);
+        if (rows.isEmpty()) throw new IllegalArgumentException("Upload session not found or expired: " + sessionId);
+        return rows.get(0);
+    }
+
+    private List<Integer> getCompletedChunks(String sessionId, int totalChunks) {
+        return pgJdbc.queryForList(
+                "SELECT chunk_number FROM upload_session_parts WHERE session_id=? ORDER BY chunk_number",
+                Integer.class, sessionId);
+    }
+
+    private void cleanupSession(String sessionId) {
+        pgJdbc.update("DELETE FROM upload_session_parts WHERE session_id=?", sessionId);
+        pgJdbc.update("DELETE FROM upload_sessions WHERE session_id=?", sessionId);
+    }
+
+    private byte[] assembleChunks(List<byte[]> parts) {
+        int total = parts.stream().mapToInt(b -> b.length).sum();
+        byte[] result = new byte[total];
+        int offset = 0;
+        for (byte[] part : parts) {
+            System.arraycopy(part, 0, result, offset, part.length);
+            offset += part.length;
         }
-        try {
-            return objectMapper.readValue(json, new TypeReference<List<Integer>>() {});
-        } catch (Exception e) {
-            return new ArrayList<>();
-        }
+        return result;
+    }
+
+    private String toJson(Object obj) {
+        try { return objectMapper.writeValueAsString(obj); } catch (Exception e) { return "[]"; }
     }
 }

@@ -9,32 +9,52 @@ import com.cms.repository.UserRepository;
 import com.cms.security.JwtProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class AuthService {
 
     private final UserRepository userRepository;
     private final UserOrganizationRoleRepository userOrgRoleRepository;
     private final JwtProvider jwtProvider;
     private final PasswordEncoder passwordEncoder;
-    private final RedisTemplate<String, String> redisTemplate;
+    private final JdbcTemplate pgJdbc;
     private final AuditService auditService;
     private final PolicyService policyService;
     private final OrganizationService organizationService;
     private final TwoFactorService twoFactorService;
+
+    public AuthService(UserRepository userRepository,
+                       UserOrganizationRoleRepository userOrgRoleRepository,
+                       JwtProvider jwtProvider,
+                       PasswordEncoder passwordEncoder,
+                       @Qualifier("pgJdbcTemplate") JdbcTemplate pgJdbc,
+                       AuditService auditService,
+                       PolicyService policyService,
+                       OrganizationService organizationService,
+                       TwoFactorService twoFactorService) {
+        this.userRepository = userRepository;
+        this.userOrgRoleRepository = userOrgRoleRepository;
+        this.jwtProvider = jwtProvider;
+        this.passwordEncoder = passwordEncoder;
+        this.pgJdbc = pgJdbc;
+        this.auditService = auditService;
+        this.policyService = policyService;
+        this.organizationService = organizationService;
+        this.twoFactorService = twoFactorService;
+    }
 
     private static final String BLOCKLIST_PREFIX = "jwt:blocklist:";
     private static final String FAILED_ATTEMPTS_PREFIX = "auth:failed:";
@@ -47,13 +67,16 @@ public class AuthService {
         Organization org = organizationService.getByIdInternal(organizationId);
         Map<String, Object> policy = policyService.getEffectivePolicy(org.getPolicies());
 
-        // Check lockout (skip gracefully if Redis is unavailable)
+        // Check lockout
         String lockoutKey = LOCKOUT_PREFIX + organizationId + ":" + email;
         Boolean isLocked = false;
         try {
-            isLocked = redisTemplate.hasKey(lockoutKey);
+            Integer count = pgJdbc.queryForObject(
+                "SELECT COUNT(*) FROM jwt_tokens WHERE jti=? AND token_type='LOCKOUT' AND expires_at>NOW()",
+                Integer.class, lockoutKey);
+            isLocked = count != null && count > 0;
         } catch (Exception e) {
-            log.warn("Redis unavailable — skipping lockout check: {}", e.getMessage());
+            log.warn("PG unavailable — skipping lockout check: {}", e.getMessage());
         }
         if (Boolean.TRUE.equals(isLocked)) {
             throw new AuthenticationException("AUTH_ACCOUNT_LOCKED",
@@ -80,9 +103,10 @@ public class AuthService {
 
         // Clear failed attempts
         try {
-            redisTemplate.delete(FAILED_ATTEMPTS_PREFIX + organizationId + ":" + email);
+            pgJdbc.update("DELETE FROM jwt_tokens WHERE jti=? AND token_type='FAILED_ATTEMPTS'",
+                    FAILED_ATTEMPTS_PREFIX + organizationId + ":" + email);
         } catch (Exception e) {
-            log.warn("Redis unavailable — could not clear failed attempts: {}", e.getMessage());
+            log.warn("PG unavailable — could not clear failed attempts: {}", e.getMessage());
         }
 
         // ── Two-factor authentication check ───────────────────────────────────
@@ -90,13 +114,13 @@ public class AuthService {
             // Issue a short-lived pending token and send OTP if EMAIL method
             String pendingToken = UUID.randomUUID().toString();
             try {
-                redisTemplate.opsForValue().set(
-                        PENDING_2FA_PREFIX + pendingToken,
-                        String.valueOf(user.getId()),
-                        Duration.ofMinutes(5)
-                );
+                pgJdbc.update("""
+                        INSERT INTO jwt_tokens (jti, token_type, value, expires_at)
+                        VALUES (?, 'PENDING_2FA', ?, NOW() + INTERVAL '5 minutes')
+                        ON CONFLICT (jti) DO UPDATE SET value=EXCLUDED.value, expires_at=EXCLUDED.expires_at
+                        """, PENDING_2FA_PREFIX + pendingToken, String.valueOf(user.getId()));
             } catch (Exception e) {
-                log.warn("Redis unavailable — 2FA pending token not stored: {}", e.getMessage());
+                log.warn("PG unavailable — 2FA pending token not stored: {}", e.getMessage());
             }
 
             var method = twoFactorService.getMethod(user.getId()).orElse(null);
@@ -120,16 +144,16 @@ public class AuthService {
         String accessToken = jwtProvider.generateAccessToken(user.getId(), organizationId, roles, accessTokenExpirationMs);
         String refreshToken = jwtProvider.generateRefreshToken(user.getId());
 
-        // Store refresh token in Redis (best-effort — skip if unavailable)
+        // Store refresh token in PostgreSQL
         String refreshJti = jwtProvider.getTokenId(refreshToken);
         try {
-            redisTemplate.opsForValue().set(
-                    REFRESH_TOKEN_PREFIX + refreshJti,
-                    String.valueOf(user.getId()),
-                    7, TimeUnit.DAYS
-            );
+            pgJdbc.update("""
+                    INSERT INTO jwt_tokens (jti, token_type, value, expires_at)
+                    VALUES (?, 'REFRESH', ?, NOW() + INTERVAL '7 days')
+                    ON CONFLICT (jti) DO UPDATE SET value=EXCLUDED.value, expires_at=EXCLUDED.expires_at
+                    """, REFRESH_TOKEN_PREFIX + refreshJti, String.valueOf(user.getId()));
         } catch (Exception e) {
-            log.warn("Redis unavailable — refresh token not stored: {}", e.getMessage());
+            log.warn("PG unavailable — refresh token not stored: {}", e.getMessage());
         }
 
         // Update last login
@@ -149,7 +173,12 @@ public class AuthService {
     @Transactional
     public AuthResult completeTwoFactorLogin(String pendingToken, String code, String ipAddress) {
         String key = PENDING_2FA_PREFIX + pendingToken;
-        String storedUserId = redisTemplate.opsForValue().get(key);
+        String storedUserId = null;
+        try {
+            storedUserId = pgJdbc.queryForObject(
+                "SELECT value FROM jwt_tokens WHERE jti=? AND token_type='PENDING_2FA' AND expires_at>NOW()",
+                String.class, key);
+        } catch (Exception ignored) {}
         if (storedUserId == null) {
             throw new AuthenticationException("AUTH_INVALID_2FA_TOKEN",
                     "2FA session expired or invalid — please log in again");
@@ -163,7 +192,7 @@ public class AuthService {
             throw new AuthenticationException("AUTH_INVALID_2FA_CODE", "Invalid verification code");
         }
 
-        redisTemplate.delete(key);
+        pgJdbc.update("DELETE FROM jwt_tokens WHERE jti=?", key);
 
         Organization org = user.getOrganization();
         Long orgId = org.getId();
@@ -179,11 +208,11 @@ public class AuthService {
         String refreshToken = jwtProvider.generateRefreshToken(userId);
 
         String refreshJti = jwtProvider.getTokenId(refreshToken);
-        redisTemplate.opsForValue().set(
-                REFRESH_TOKEN_PREFIX + refreshJti,
-                String.valueOf(userId),
-                7, TimeUnit.DAYS
-        );
+        pgJdbc.update("""
+                INSERT INTO jwt_tokens (jti, token_type, value, expires_at)
+                VALUES (?, 'REFRESH', ?, NOW() + INTERVAL '7 days')
+                ON CONFLICT (jti) DO UPDATE SET value=EXCLUDED.value, expires_at=EXCLUDED.expires_at
+                """, REFRESH_TOKEN_PREFIX + refreshJti, String.valueOf(userId));
 
         user.setLastLoginAt(Instant.now());
         userRepository.save(user);
@@ -198,14 +227,19 @@ public class AuthService {
         }
 
         String jti = jwtProvider.getTokenId(refreshToken);
-        String storedUserId = redisTemplate.opsForValue().get(REFRESH_TOKEN_PREFIX + jti);
+        String storedUserId = null;
+        try {
+            storedUserId = pgJdbc.queryForObject(
+                "SELECT value FROM jwt_tokens WHERE jti=? AND token_type='REFRESH' AND expires_at>NOW()",
+                String.class, REFRESH_TOKEN_PREFIX + jti);
+        } catch (Exception ignored) {}
 
         if (storedUserId == null) {
             throw new AuthenticationException("AUTH_INVALID_REFRESH_TOKEN", "Refresh token has been revoked");
         }
 
         // Invalidate old refresh token
-        redisTemplate.delete(REFRESH_TOKEN_PREFIX + jti);
+        pgJdbc.update("DELETE FROM jwt_tokens WHERE jti=?", REFRESH_TOKEN_PREFIX + jti);
 
         Long userId = Long.parseLong(storedUserId);
         User user = userRepository.findById(userId)
@@ -225,13 +259,12 @@ public class AuthService {
         String newAccessToken = jwtProvider.generateAccessToken(userId, orgId, roles, accessTokenExpirationMs);
         String newRefreshToken = jwtProvider.generateRefreshToken(userId);
 
-        // Store new refresh token
         String newRefreshJti = jwtProvider.getTokenId(newRefreshToken);
-        redisTemplate.opsForValue().set(
-                REFRESH_TOKEN_PREFIX + newRefreshJti,
-                String.valueOf(userId),
-                7, TimeUnit.DAYS
-        );
+        pgJdbc.update("""
+                INSERT INTO jwt_tokens (jti, token_type, value, expires_at)
+                VALUES (?, 'REFRESH', ?, NOW() + INTERVAL '7 days')
+                ON CONFLICT (jti) DO UPDATE SET value=EXCLUDED.value, expires_at=EXCLUDED.expires_at
+                """, REFRESH_TOKEN_PREFIX + newRefreshJti, String.valueOf(userId));
 
         return new AuthResult(newAccessToken, newRefreshToken, (int) (accessTokenExpirationMs / 1000), user, org, orgRole);
     }
@@ -241,10 +274,11 @@ public class AuthService {
             String jti = jwtProvider.getTokenId(accessToken);
             long remaining = jwtProvider.getRemainingExpiration(accessToken);
             if (remaining > 0) {
-                redisTemplate.opsForValue().set(
-                        BLOCKLIST_PREFIX + jti, "blocked",
-                        remaining, TimeUnit.MILLISECONDS
-                );
+                pgJdbc.update("""
+                        INSERT INTO jwt_tokens (jti, token_type, value, expires_at)
+                        VALUES (?, 'BLOCKLIST', 'blocked', NOW() + (? * INTERVAL '1 millisecond'))
+                        ON CONFLICT (jti) DO NOTHING
+                        """, BLOCKLIST_PREFIX + jti, remaining);
             }
         }
     }
@@ -253,18 +287,33 @@ public class AuthService {
                                      Organization org, String ipAddress) {
         try {
             String failedKey = FAILED_ATTEMPTS_PREFIX + orgId + ":" + email;
-            Long attempts = redisTemplate.opsForValue().increment(failedKey);
-            redisTemplate.expire(failedKey, Duration.ofMinutes(policyService.getAccountLockoutMinutes(policy)));
-
+            int lockoutMinutes = policyService.getAccountLockoutMinutes(policy);
             int maxAttempts = policyService.getMaxFailedLoginAttempts(policy);
-            if (attempts != null && attempts >= maxAttempts) {
+
+            // Upsert failed attempt counter
+            pgJdbc.update("""
+                    INSERT INTO jwt_tokens (jti, token_type, value, expires_at)
+                    VALUES (?, 'FAILED_ATTEMPTS', '1', NOW() + (? * INTERVAL '1 minute'))
+                    ON CONFLICT (jti) DO UPDATE
+                      SET value = (CAST(jwt_tokens.value AS INT) + 1)::TEXT,
+                          expires_at = NOW() + (? * INTERVAL '1 minute')
+                    """, failedKey, lockoutMinutes, lockoutMinutes);
+
+            String countStr = pgJdbc.queryForObject(
+                    "SELECT value FROM jwt_tokens WHERE jti=?", String.class, failedKey);
+            int attempts = countStr != null ? Integer.parseInt(countStr) : 0;
+
+            if (attempts >= maxAttempts) {
                 String lockoutKey = LOCKOUT_PREFIX + orgId + ":" + email;
-                redisTemplate.opsForValue().set(lockoutKey, "locked",
-                        Duration.ofMinutes(policyService.getAccountLockoutMinutes(policy)));
-                redisTemplate.delete(failedKey);
+                pgJdbc.update("""
+                        INSERT INTO jwt_tokens (jti, token_type, value, expires_at)
+                        VALUES (?, 'LOCKOUT', 'locked', NOW() + (? * INTERVAL '1 minute'))
+                        ON CONFLICT (jti) DO UPDATE SET expires_at=EXCLUDED.expires_at
+                        """, lockoutKey, lockoutMinutes);
+                pgJdbc.update("DELETE FROM jwt_tokens WHERE jti=?", failedKey);
             }
         } catch (Exception e) {
-            log.warn("Redis unavailable — failed attempt tracking skipped: {}", e.getMessage());
+            log.warn("PG unavailable — failed attempt tracking skipped: {}", e.getMessage());
         }
 
         auditService.log(org, null, "LOGIN_FAILED", ipAddress);

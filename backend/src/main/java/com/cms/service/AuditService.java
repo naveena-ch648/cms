@@ -5,7 +5,6 @@ import com.cms.repository.AuditEventRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -13,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -22,10 +22,10 @@ public class AuditService {
     private final AuditEventRepository auditEventRepository;
     private final AuditSearchService auditSearchService;
     private final AuditAlertService auditAlertService;
-    private final StringRedisTemplate redisTemplate;
+    private final JobQueueService jobQueueService;
     private final ObjectMapper objectMapper;
 
-    private static final String BUFFER_KEY = "audit:buffer";
+    private static final String BUFFER_QUEUE = "audit:buffer";
 
     @Async
     public void logAsync(Organization org, User user, AuditEventType eventType, AuditCategory category,
@@ -122,32 +122,16 @@ public class AuditService {
 
     private void bufferEvent(Long eventId) {
         try {
-            redisTemplate.opsForList().rightPush(BUFFER_KEY, eventId.toString());
+            jobQueueService.push(BUFFER_QUEUE, Map.of("eventId", eventId));
         } catch (Exception e) {
-            log.error("Failed to buffer audit event {} in Redis", eventId, e);
+            log.error("Failed to buffer audit event {} in job_queue", eventId, e);
         }
     }
 
     @Scheduled(fixedDelay = 60000)
     public void retryBufferedEvents() {
-        try {
-            String eventIdStr;
-            int retried = 0;
-            while ((eventIdStr = redisTemplate.opsForList().leftPop(BUFFER_KEY)) != null && retried < 100) {
-                Long eventId = Long.valueOf(eventIdStr);
-                auditEventRepository.findById(eventId).ifPresent(event -> {
-                    try {
-                        auditSearchService.indexEvent(event);
-                    } catch (Exception e) {
-                        log.warn("Retry indexing failed for event {}, re-buffering", eventId);
-                        bufferEvent(eventId);
-                    }
-                });
-                retried++;
-            }
-        } catch (Exception e) {
-            log.error("Error processing buffered audit events", e);
-        }
+        // Buffered events are retried by the worker polling job_queue
+        // No direct Redis pop needed here — kept as no-op placeholder
     }
 
     @Scheduled(cron = "0 0 2 * * *")

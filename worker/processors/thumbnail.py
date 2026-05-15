@@ -3,24 +3,14 @@
 import io
 import tempfile
 
-import boto3
 import pymysql
 from PIL import Image
 
 from config import Config
+from processors.storage import get_object, put_object
 
 THUMBNAIL_MAX_SIZE = (300, 300)
 SUPPORTED_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp", "image/tiff"}
-
-
-def get_s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=Config.MINIO_ENDPOINT,
-        aws_access_key_id=Config.MINIO_ACCESS_KEY,
-        aws_secret_access_key=Config.MINIO_SECRET_KEY,
-        region_name=Config.MINIO_REGION,
-    )
 
 
 def get_db_connection():
@@ -53,11 +43,10 @@ def process_thumbnail(file_id: str, org_id: str):
             if mime_type not in SUPPORTED_TYPES:
                 return
 
-            s3 = get_s3_client()
+            s3 = None  # unused
 
             # Download original
-            response = s3.get_object(Bucket=bucket, Key=key)
-            image_data = response["Body"].read()
+            image_data = get_object(bucket, key)
 
             # Generate thumbnail
             img = Image.open(io.BytesIO(image_data))
@@ -70,12 +59,7 @@ def process_thumbnail(file_id: str, org_id: str):
 
             # Upload thumbnail
             thumb_key = f"thumbnails/{file_id}.webp"
-            s3.put_object(
-                Bucket=bucket,
-                Key=thumb_key,
-                Body=thumb_buffer.getvalue(),
-                ContentType="image/webp",
-            )
+            put_object(bucket, thumb_key, thumb_buffer.getvalue(), "image/webp")
 
             # Update DB
             cur.execute(

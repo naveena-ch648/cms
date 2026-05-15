@@ -37,7 +37,11 @@ frontend/build/
 # OS
 .DS_Store
 Thumbs.db
+*.db
+*.sqlite
 *.tmp
+build_output.txt
+redis_scan.txt
 
 # Docker
 docker/mysql-data/

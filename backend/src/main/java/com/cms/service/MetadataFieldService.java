@@ -10,11 +10,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
@@ -25,11 +23,9 @@ public class MetadataFieldService {
 
     private final MetadataFieldRepository metadataFieldRepository;
     private final WorkspaceRepository workspaceRepository;
-    private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
 
     private static final String CACHE_KEY_PREFIX = "metadata:fields:workspace:";
-    private static final Duration CACHE_TTL = Duration.ofMinutes(10);
     private static final int MAX_FIELDS_PER_WORKSPACE = 50;
 
     @Transactional
@@ -146,7 +142,6 @@ public class MetadataFieldService {
     }
 
     private void invalidateCache(Long workspaceId) {
-        String cacheKey = CACHE_KEY_PREFIX + workspaceId;
-        redisTemplate.delete(cacheKey);
+        // No-op: caching removed
     }
 }

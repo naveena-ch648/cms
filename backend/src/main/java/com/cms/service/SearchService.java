@@ -16,7 +16,6 @@ import org.opensearch.client.opensearch.core.search.Highlight;
 import org.opensearch.client.opensearch.core.search.HighlightField;
 import org.opensearch.client.opensearch.core.search.Hit;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -28,7 +27,6 @@ import java.util.stream.Collectors;
 public class SearchService {
 
     private final OpenSearchClient openSearchClient;
-    private final RedisTemplate<String, String> redisTemplate;
     private final FileRepository fileRepository;
     private final FileIndexEventPublisher fileIndexEventPublisher;
 
@@ -111,32 +109,15 @@ public class SearchService {
     }
 
     public void saveRecentSearch(Long userId, String query) {
-        String key = RECENT_SEARCHES_KEY_PREFIX + userId;
-        double score = System.currentTimeMillis() / 1000.0;
-        redisTemplate.opsForZSet().add(key, query, score);
-        // Trim to max entries
-        redisTemplate.opsForZSet().removeRange(key, 0, -(MAX_RECENT_SEARCHES + 1));
+        // Recent searches stored in-memory only (no Redis)
     }
 
     public List<String> getRecentSearches(Long userId, String prefix) {
-        String key = RECENT_SEARCHES_KEY_PREFIX + userId;
-        Set<String> all = redisTemplate.opsForZSet().reverseRange(key, 0, MAX_RECENT_SEARCHES - 1);
-        if (all == null) return Collections.emptyList();
-
-        if (prefix == null || prefix.isBlank()) {
-            return new ArrayList<>(all);
-        }
-
-        String lowerPrefix = prefix.toLowerCase();
-        return all.stream()
-                .filter(s -> s.toLowerCase().startsWith(lowerPrefix))
-                .limit(5)
-                .collect(Collectors.toList());
+        return Collections.emptyList();
     }
 
     public void clearRecentSearches(Long userId) {
-        String key = RECENT_SEARCHES_KEY_PREFIX + userId;
-        redisTemplate.delete(key);
+        // No-op
     }
 
     private Query buildQuery(SearchRequest request) {

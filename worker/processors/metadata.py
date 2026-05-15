@@ -4,21 +4,11 @@ import json
 import tempfile
 import os
 
-import boto3
 import magic
 import pymysql
 
 from config import Config
-
-
-def get_s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=Config.MINIO_ENDPOINT,
-        aws_access_key_id=Config.MINIO_ACCESS_KEY,
-        aws_secret_access_key=Config.MINIO_SECRET_KEY,
-        region_name=Config.MINIO_REGION,
-    )
+from processors.storage import get_object_range
 
 
 def get_db_connection():
@@ -48,11 +38,10 @@ def process_metadata(file_id: str, org_id: str):
 
             bucket, key, mime_type = row
 
-            s3 = get_s3_client()
+            s3 = None  # unused
 
             # Download first 8KB for magic detection
-            response = s3.get_object(Bucket=bucket, Key=key, Range="bytes=0-8191")
-            header_bytes = response["Body"].read()
+            header_bytes = get_object_range(bucket, key, 0, 8191)
 
             # Detect MIME type via libmagic
             detected_mime = magic.from_buffer(header_bytes, mime=True)

@@ -14,11 +14,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -26,21 +24,15 @@ import java.util.UUID;
 @Service
 public class ConversationService {
 
-    private static final String CONVERSATION_CACHE_PREFIX = "qa:conv:";
-    private static final Duration CONVERSATION_CACHE_TTL = Duration.ofMinutes(30);
-
     private final ConversationRepository conversationRepository;
     private final ConversationMessageRepository messageRepository;
-    private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
 
     public ConversationService(ConversationRepository conversationRepository,
                                ConversationMessageRepository messageRepository,
-                               StringRedisTemplate redisTemplate,
                                ObjectMapper objectMapper) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
-        this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
     }
 
@@ -99,8 +91,8 @@ public class ConversationService {
         conversation.setMessageCount(conversation.getMessageCount() + 1);
         conversationRepository.save(conversation);
 
-        // Invalidate conversation context cache
-        redisTemplate.delete(CONVERSATION_CACHE_PREFIX + conversation.getUuid() + ":context");
+        // Invalidate conversation context cache (no-op, caching removed)
+        // redisTemplate.delete(CONVERSATION_CACHE_PREFIX + conversation.getUuid() + ":context");
 
         return message;
     }
@@ -110,11 +102,6 @@ public class ConversationService {
      * Uses Redis cache with 30-min TTL for active conversations.
      */
     public String getRecentContext(String conversationUuid) {
-        // Check cache first
-        String cacheKey = CONVERSATION_CACHE_PREFIX + conversationUuid + ":context";
-        String cached = redisTemplate.opsForValue().get(cacheKey);
-        if (cached != null) return cached;
-
         Conversation conversation = conversationRepository.findByUuid(conversationUuid).orElse(null);
         if (conversation == null) return "";
 
@@ -123,7 +110,6 @@ public class ConversationService {
 
         if (messages.isEmpty()) return "";
 
-        // Reverse to chronological order
         Collections.reverse(messages);
 
         StringBuilder sb = new StringBuilder();
@@ -132,10 +118,7 @@ public class ConversationService {
             sb.append(msg.getContent()).append("\n");
         }
 
-        String context = sb.toString();
-        redisTemplate.opsForValue().set(cacheKey, context, CONVERSATION_CACHE_TTL);
-
-        return context;
+        return sb.toString();
     }
 
     public Conversation getConversationByUuid(String uuid) {

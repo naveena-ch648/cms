@@ -1,17 +1,17 @@
-package com.cms.service;
-
 import com.cms.entity.*;
 import com.cms.repository.AuditAlertInstanceRepository;
 import com.cms.repository.AuditAlertRuleRepository;
 import com.cms.repository.AuditEventRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 @RequiredArgsConstructor
@@ -21,9 +21,10 @@ public class AuditAlertService {
     private final AuditAlertRuleRepository ruleRepository;
     private final AuditAlertInstanceRepository instanceRepository;
     private final AuditEventRepository auditEventRepository;
-    private final StringRedisTemplate redisTemplate;
 
     private static final String COUNTER_PREFIX = "audit:alert:counter:";
+    private record Window(AtomicLong count, Instant expiresAt) {}
+    private final ConcurrentHashMap<String, Window> counters = new ConcurrentHashMap<>();
 
     public void evaluateThresholds(AuditEvent event) {
         Long orgId = event.getOrganization().getId();
@@ -35,13 +36,19 @@ public class AuditAlertService {
             String counterKey = COUNTER_PREFIX + rule.getId() + ":" +
                     (event.getUser() != null ? event.getUser().getId() : "anon");
             try {
-                Long count = redisTemplate.opsForValue().increment(counterKey);
-                if (count != null && count == 1) {
-                    redisTemplate.expire(counterKey, Duration.ofMinutes(rule.getTimeWindowMinutes()));
-                }
-                if (count != null && count >= rule.getThresholdCount()) {
-                    triggerAlert(rule, event, count.intValue());
-                    redisTemplate.delete(counterKey);
+                Instant now = Instant.now();
+                Duration window = Duration.ofMinutes(rule.getTimeWindowMinutes());
+                counters.compute(counterKey, (k, existing) -> {
+                    if (existing == null || now.isAfter(existing.expiresAt())) {
+                        return new Window(new AtomicLong(1), now.plus(window));
+                    }
+                    existing.count().incrementAndGet();
+                    return existing;
+                });
+                Window w = counters.get(counterKey);
+                if (w != null && w.count().get() >= rule.getThresholdCount()) {
+                    triggerAlert(rule, event, (int) w.count().get());
+                    counters.remove(counterKey);
                 }
             } catch (Exception e) {
                 log.warn("Failed to evaluate alert rule {} for event {}", rule.getId(), event.getId(), e);

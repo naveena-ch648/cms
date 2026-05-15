@@ -17,7 +17,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,7 +33,7 @@ public class AIAutomationService {
     private final AIJobRepository aiJobRepository;
     private final FileRepository fileRepository;
     private final OrganizationRepository organizationRepository;
-    private final RedisTemplate<String, String> redisTemplate;
+    private final JobQueueService jobQueueService;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -223,7 +222,7 @@ public class AIAutomationService {
             message.put("mimeType", file.getMimeType());
 
             String payload = objectMapper.writeValueAsString(message);
-            redisTemplate.opsForList().leftPush(AI_QUEUE, payload);
+            jobQueueService.push(AI_QUEUE, payload);
         } catch (Exception e) {
             log.error("Failed to publish AI job to queue: jobId={}", job.getUuid(), e);
         }

@@ -19,7 +19,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,7 +26,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -39,7 +37,6 @@ public class FolderService {
     private final WorkspaceRepository workspaceRepository;
     private final UserRepository userRepository;
     private final AuditService auditService;
-    private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
 
     private static final String FOLDER_TREE_CACHE_PREFIX = "folder_tree:";
@@ -91,19 +88,8 @@ public class FolderService {
         Workspace workspace = workspaceRepository.findByUuid(workspaceUuid)
                 .orElseThrow(() -> new ResourceNotFoundException("Workspace not found"));
 
-        // Check cache first
+        // Check cache (removed, query DB directly)
         String cacheKey = FOLDER_TREE_CACHE_PREFIX + workspace.getId();
-        if (!lazy) {
-            String cached = redisTemplate.opsForValue().get(cacheKey);
-            if (cached != null) {
-                try {
-                    return objectMapper.readValue(cached, new TypeReference<List<FolderTreeResponse>>() {});
-                } catch (JsonProcessingException e) {
-                    // Cache corrupted, proceed to DB query
-                }
-            }
-        }
-
         List<Folder> folders;
         if (lazy) {
             folders = folderRepository.findByWorkspaceIdAndParentIsNullAndStatusOrderBySortOrder(
@@ -118,16 +104,7 @@ public class FolderService {
                         folderRepository.countByParentIdAndStatus(f.getId(), Folder.FolderStatus.ACTIVE)))
                 .toList();
 
-        // Cache full tree (not lazy)
-        if (!lazy) {
-            try {
-                String json = objectMapper.writeValueAsString(responses);
-                redisTemplate.opsForValue().set(cacheKey, json, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
-            } catch (JsonProcessingException e) {
-                // Log but don't fail on cache write error
-            }
-        }
-
+        // (no caching)
         return responses;
     }
 
@@ -347,6 +324,6 @@ public class FolderService {
     }
 
     private void invalidateTreeCache(Long workspaceId) {
-        redisTemplate.delete(FOLDER_TREE_CACHE_PREFIX + workspaceId);
+        // No-op: caching removed
     }
 }

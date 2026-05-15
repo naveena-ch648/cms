@@ -3,23 +3,13 @@
 import io
 import uuid
 
-import boto3
 import pymysql
 from PIL import Image
 
 from config import Config
+from processors.storage import get_object, put_object
 
 THUMBNAIL_SIZE = (256, 256)
-
-
-def get_s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=Config.MINIO_ENDPOINT,
-        aws_access_key_id=Config.MINIO_ACCESS_KEY,
-        aws_secret_access_key=Config.MINIO_SECRET_KEY,
-        region_name=Config.MINIO_REGION,
-    )
 
 
 def get_db_connection():
@@ -36,7 +26,6 @@ def get_db_connection():
 def process_image_thumbnail(file_id: str, org_id: str, storage_bucket: str, storage_key: str):
     """Generate a 256x256 thumbnail for an image file."""
     conn = get_db_connection()
-    s3 = get_s3_client()
 
     try:
         # Update job status
@@ -56,9 +45,8 @@ def process_image_thumbnail(file_id: str, org_id: str, storage_bucket: str, stor
             )
             conn.commit()
 
-        # Download image from MinIO
-        response = s3.get_object(Bucket=storage_bucket, Key=storage_key)
-        image_data = response["Body"].read()
+        # Download image from PostgreSQL storage
+        image_data = get_object(storage_bucket, storage_key)
 
         # Generate thumbnail
         img = Image.open(io.BytesIO(image_data))
@@ -74,12 +62,7 @@ def process_image_thumbnail(file_id: str, org_id: str, storage_bucket: str, stor
 
         # Upload thumbnail
         thumb_key = f"thumbnails/{file_id}/thumbnail.jpg"
-        s3.put_object(
-            Bucket=storage_bucket,
-            Key=thumb_key,
-            Body=thumb_buffer.getvalue(),
-            ContentType="image/jpeg",
-        )
+        put_object(storage_bucket, thumb_key, thumb_buffer.getvalue(), "image/jpeg")
 
         # Update preview record
         with conn.cursor() as cur:

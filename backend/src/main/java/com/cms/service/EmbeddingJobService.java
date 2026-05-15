@@ -6,7 +6,6 @@ import com.cms.entity.EmbeddingJob.JobStatus;
 import com.cms.entity.FileEntity;
 import com.cms.repository.EmbeddingJobRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,16 +17,16 @@ public class EmbeddingJobService {
     private static final String EMBEDDING_QUEUE = "embedding:process";
 
     private final EmbeddingJobRepository embeddingJobRepository;
-    private final StringRedisTemplate redisTemplate;
+    private final JobQueueService jobQueueService;
     private final LLMConfig llmConfig;
     private final ObjectMapper objectMapper;
 
     public EmbeddingJobService(EmbeddingJobRepository embeddingJobRepository,
-                               StringRedisTemplate redisTemplate,
+                               JobQueueService jobQueueService,
                                LLMConfig llmConfig,
                                ObjectMapper objectMapper) {
         this.embeddingJobRepository = embeddingJobRepository;
-        this.redisTemplate = redisTemplate;
+        this.jobQueueService = jobQueueService;
         this.llmConfig = llmConfig;
         this.objectMapper = objectMapper;
     }
@@ -53,7 +52,7 @@ public class EmbeddingJobService {
 
         job = embeddingJobRepository.save(job);
 
-        // Push job to Redis queue
+        // Push job to PostgreSQL queue
         try {
             Map<String, Object> jobData = new HashMap<>();
             jobData.put("fileId", file.getId());
@@ -65,9 +64,7 @@ public class EmbeddingJobService {
             jobData.put("mimeType", file.getMimeType());
             jobData.put("fileName", file.getName());
             jobData.put("jobUuid", job.getUuid());
-
-            String payload = objectMapper.writeValueAsString(jobData);
-            redisTemplate.opsForList().leftPush(EMBEDDING_QUEUE, payload);
+            jobQueueService.push(EMBEDDING_QUEUE, jobData);
         } catch (Exception e) {
             throw new RuntimeException("Failed to dispatch embedding job", e);
         }

@@ -16,7 +16,7 @@ public interface FileShareRepository extends JpaRepository<FileShare, Long> {
     Optional<FileShare> findByUuid(String uuid);
 
     /** Find a specific share record (any status) for dedup checks */
-    Optional<FileShare> findByFileIdAndSharedWithUserId(Long fileId, Long sharedWithUserId);
+    Optional<FileShare> findByFileIdAndSharedWithId(Long fileId, Long sharedWithId);
 
     /** All active shares for a file — used to list who can access a file */
     @Query("SELECT fs FROM FileShare fs " +

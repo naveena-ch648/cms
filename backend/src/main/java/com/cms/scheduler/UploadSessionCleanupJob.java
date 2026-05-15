@@ -1,67 +1,37 @@
 package com.cms.scheduler;
 
-import com.cms.service.StorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.util.Map;
-import java.util.Set;
-
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class UploadSessionCleanupJob {
 
-    private final RedisTemplate<String, String> redisTemplate;
-    private final StorageService storageService;
+    private final JdbcTemplate pgJdbc;
 
-    private static final String SESSION_PREFIX = "upload_session:";
-    private static final Duration SESSION_MAX_AGE = Duration.ofHours(24);
+    public UploadSessionCleanupJob(@Qualifier("pgJdbcTemplate") JdbcTemplate pgJdbc) {
+        this.pgJdbc = pgJdbc;
+    }
 
     @Scheduled(fixedRate = 3600000) // every hour
     public void cleanupExpiredSessions() {
-        Set<String> keys = redisTemplate.keys(SESSION_PREFIX + "*");
-        if (keys == null || keys.isEmpty()) return;
-
-        int cleaned = 0;
-        for (String key : keys) {
-            try {
-                Map<Object, Object> session = redisTemplate.opsForHash().entries(key);
-                if (session.isEmpty()) continue;
-
-                String createdAtStr = (String) session.get("createdAt");
-                if (createdAtStr == null) continue;
-
-                Instant createdAt = Instant.parse(createdAtStr);
-                if (Instant.now().isAfter(createdAt.plus(SESSION_MAX_AGE))) {
-                    // Abort S3 multipart upload
-                    String bucket = (String) session.get("s3Bucket");
-                    String storageKey = (String) session.get("s3Key");
-                    String uploadId = (String) session.get("s3UploadId");
-
-                    if (bucket != null && storageKey != null && uploadId != null) {
-                        try {
-                            storageService.abortMultipartUpload(bucket, storageKey, uploadId);
-                        } catch (Exception e) {
-                            log.warn("Failed to abort multipart upload for session {}: {}", key, e.getMessage());
-                        }
-                    }
-
-                    redisTemplate.delete(key);
-                    cleaned++;
-                }
-            } catch (Exception e) {
-                log.warn("Error cleaning up session {}: {}", key, e.getMessage());
+        try {
+            int deleted = pgJdbc.update("""
+                    DELETE FROM upload_session_parts
+                    WHERE session_id IN (
+                        SELECT session_id FROM upload_sessions WHERE expires_at < NOW()
+                    )
+                    """);
+            int sessions = pgJdbc.update("DELETE FROM upload_sessions WHERE expires_at < NOW()");
+            if (sessions > 0) {
+                log.info("Cleaned up {} expired upload sessions ({} parts)", sessions, deleted);
             }
-        }
-
-        if (cleaned > 0) {
-            log.info("Cleaned up {} expired upload sessions", cleaned);
+        } catch (Exception e) {
+            log.warn("Error during upload session cleanup: {}", e.getMessage());
         }
     }
 }

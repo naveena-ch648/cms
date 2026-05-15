@@ -1,9 +1,9 @@
 package com.cms.event;
 
+import com.cms.service.JobQueueService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -17,7 +17,7 @@ public class FileIndexEventPublisher {
 
     private static final String QUEUE_NAME = "search:index";
 
-    private final RedisTemplate<String, String> redisTemplate;
+    private final JobQueueService jobQueueService;
     private final ObjectMapper objectMapper;
 
     public void publishIndexEvent(String fileUuid, String workspaceUuid, String organizationUuid) {
@@ -36,9 +36,7 @@ public class FileIndexEventPublisher {
             event.put("workspaceId", workspaceUuid);
             event.put("organizationId", organizationUuid);
             event.put("timestamp", Instant.now().toString());
-
-            String payload = objectMapper.writeValueAsString(event);
-            redisTemplate.opsForList().leftPush(QUEUE_NAME, payload);
+            jobQueueService.push(QUEUE_NAME, event);
             log.debug("Published search index event: action={}, fileId={}", action, fileUuid);
         } catch (Exception e) {
             log.error("Failed to publish search index event for fileId={}: {}", fileUuid, e.getMessage());

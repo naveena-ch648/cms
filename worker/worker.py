@@ -1,4 +1,4 @@
-"""Main worker process — consumes file:process Redis queue."""
+"""Main worker process — polls PostgreSQL job_queue table (replaces Redis BRPOP)."""
 
 import json
 import signal
@@ -7,8 +7,8 @@ import time
 import threading
 import traceback
 
-import redis
-from botocore.exceptions import ClientError
+import psycopg2
+import psycopg2.extras
 
 from config import Config
 from processors.thumbnail import process_thumbnail
@@ -34,33 +34,91 @@ def signal_handler(sig, frame):
     running = False
 
 
-def get_redis_client():
-    return redis.Redis(host=Config.REDIS_HOST, port=Config.REDIS_PORT, decode_responses=True)
+def get_pg_conn():
+    return psycopg2.connect(
+        host=Config.PG_HOST,
+        port=Config.PG_PORT,
+        dbname=Config.PG_DB,
+        user=Config.PG_USER,
+        password=Config.PG_PASSWORD,
+    )
 
 
-def process_job(r: redis.Redis, job_data: dict):
-    file_id = job_data.get("fileId")
-    org_id = job_data.get("organizationId")
-    action = job_data.get("action", "process")
-    mime_type = job_data.get("mimeType", "")
-    storage_bucket = job_data.get("storageBucket", "")
-    storage_key = job_data.get("storageKey", "")
+def claim_job(conn, queue_names: list):
+    """Atomically claim one PENDING job from any of the given queues. Returns (id, queue_name, payload) or None."""
+    placeholders = ",".join(["%s"] * len(queue_names))
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute(f"""
+            UPDATE job_queue
+            SET status = 'PROCESSING', updated_at = NOW()
+            WHERE id = (
+                SELECT id FROM job_queue
+                WHERE queue_name IN ({placeholders})
+                  AND status = 'PENDING'
+                  AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
+                ORDER BY created_at ASC
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING id, queue_name, payload, retry_count
+        """, queue_names)
+        row = cur.fetchone()
+        conn.commit()
+        if row:
+            return dict(row)
+    return None
+
+
+def ack_job(conn, job_id: int):
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM job_queue WHERE id = %s", (job_id,))
+    conn.commit()
+
+
+def fail_job(conn, job_id: int, error_msg: str, max_retries: int, retry_delays: list, dlq_name: str):
+    with conn.cursor() as cur:
+        cur.execute("SELECT retry_count, queue_name, payload FROM job_queue WHERE id = %s", (job_id,))
+        row = cur.fetchone()
+        if not row:
+            return
+        retry_count, queue_name, payload = row
+        new_retry = retry_count + 1
+        if new_retry < max_retries:
+            delay = retry_delays[retry_count] if retry_count < len(retry_delays) else 60
+            cur.execute("""
+                UPDATE job_queue
+                SET status = 'PENDING', retry_count = %s, error_msg = %s,
+                    next_attempt_at = NOW() + (%s || ' seconds')::interval,
+                    updated_at = NOW()
+                WHERE id = %s
+            """, (new_retry, error_msg[:500], str(delay), job_id))
+            print(f"Retrying job {job_id} (attempt {new_retry}/{max_retries}) after {delay}s")
+        else:
+            # Move to DLQ by changing queue_name and resetting status
+            cur.execute("""
+                UPDATE job_queue
+                SET status = 'PENDING', queue_name = %s, error_msg = %s, updated_at = NOW()
+                WHERE id = %s
+            """, (dlq_name, error_msg[:500], job_id))
+            print(f"Job {job_id} moved to DLQ ({dlq_name}) after {max_retries} failures")
+    conn.commit()
+
+
+def process_job(conn, job_data: dict):
+    payload = json.loads(job_data["payload"]) if isinstance(job_data["payload"], str) else job_data["payload"]
+    file_id = payload.get("fileId")
+    org_id = payload.get("organizationId")
+    action = payload.get("action", "process")
+    mime_type = payload.get("mimeType", "")
+    storage_bucket = payload.get("storageBucket", "")
+    storage_key = payload.get("storageKey", "")
 
     print(f"Processing file {file_id} (org={org_id}, action={action}, mime={mime_type})")
-
-    try:
-        _dispatch_action(action, mime_type, file_id, org_id, storage_bucket, storage_key, r)
-    except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code", "")
-        if error_code in ("NoSuchKey", "NoSuchBucket", "404"):
-            print(f"File not found in storage (bucket={storage_bucket}, key={storage_key}): {error_code} — skipping")
-            return
-        raise
+    _dispatch_action(action, mime_type, file_id, org_id, storage_bucket, storage_key, conn)
 
 
-def _dispatch_action(action, mime_type, file_id, org_id, storage_bucket, storage_key, r):
+def _dispatch_action(action, mime_type, file_id, org_id, storage_bucket, storage_key, conn):
     if action == "preview":
-        # Full preview generation based on mime type
         if mime_type == "application/pdf":
             process_pdf_preview(file_id, org_id, storage_bucket, storage_key)
             process_pdf_thumbnail(file_id, org_id, storage_bucket, storage_key)
@@ -79,10 +137,8 @@ def _dispatch_action(action, mime_type, file_id, org_id, storage_bucket, storage
             process_office_preview(file_id, org_id, storage_bucket, storage_key)
         else:
             print(f"Unsupported mime type for preview: {mime_type}")
-            return
 
     elif action == "thumbnail":
-        # Thumbnail-only generation
         if mime_type == "application/pdf":
             process_pdf_thumbnail(file_id, org_id, storage_bucket, storage_key)
         elif mime_type.startswith("image/"):
@@ -100,15 +156,12 @@ def _dispatch_action(action, mime_type, file_id, org_id, storage_bucket, storage
             process_office_preview(file_id, org_id, storage_bucket, storage_key)
         else:
             print(f"Unsupported mime type for thumbnail: {mime_type}")
-            return
 
     else:
-        # Legacy action: run original thumbnail + metadata processors
         try:
             process_thumbnail(file_id, org_id)
         except Exception as e:
             print(f"Thumbnail processing failed for file {file_id}: {e}")
-
         try:
             process_metadata(file_id, org_id)
         except Exception as e:
@@ -119,102 +172,81 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    print(f"Worker starting — Redis at {Config.REDIS_HOST}:{Config.REDIS_PORT}")
-    print(f"Listening on queues: {Config.QUEUE_NAME}, {Config.SEARCH_INDEX_QUEUE}, {EmbeddingConfig.EMBEDDING_QUEUE}")
-    print(f"Integration worker listening on: integration:import, integration:export")
-    print(f"AI worker listening on: {Config.AI_QUEUE}")
+    print(f"Worker starting — PostgreSQL at {Config.PG_HOST}:{Config.PG_PORT}/{Config.PG_DB}")
+    print(f"Polling queues: {Config.QUEUE_NAME}, {Config.SEARCH_INDEX_QUEUE}, {EmbeddingConfig.EMBEDDING_QUEUE}")
+    print(f"Integration/webhook/AI workers running as sub-threads")
 
-    r = get_redis_client()
+    conn = get_pg_conn()
 
-    # Start integration worker in a separate thread
-    integration_redis = get_redis_client()
+    # Sub-threads receive their own connections
+    int_conn = get_pg_conn()
     integration_thread = threading.Thread(
         target=run_integration_worker,
-        args=(integration_redis, lambda: running),
+        args=(int_conn, lambda: running),
         daemon=True,
     )
     integration_thread.start()
 
-    # Start webhook delivery worker in a separate thread
-    webhook_redis = get_redis_client()
+    wh_conn = get_pg_conn()
     webhook_thread = threading.Thread(
         target=run_webhook_worker,
-        args=(webhook_redis, lambda: running),
+        args=(wh_conn, lambda: running),
         daemon=True,
     )
     webhook_thread.start()
 
-    # Start AI automation worker in a separate thread
-    ai_redis = get_redis_client()
+    ai_conn = get_pg_conn()
     ai_thread = threading.Thread(
         target=run_ai_worker,
-        args=(ai_redis, lambda: running),
+        args=(ai_conn, lambda: running),
         daemon=True,
     )
     ai_thread.start()
 
+    MAIN_QUEUES = [Config.QUEUE_NAME, Config.SEARCH_INDEX_QUEUE, EmbeddingConfig.EMBEDDING_QUEUE]
+
     while running:
         try:
-            result = r.brpop([Config.QUEUE_NAME, Config.SEARCH_INDEX_QUEUE, EmbeddingConfig.EMBEDDING_QUEUE], timeout=5)
-            if result is None:
+            job = claim_job(conn, MAIN_QUEUES)
+            if job is None:
+                time.sleep(Config.POLL_INTERVAL)
                 continue
 
-            queue_name, payload = result
-            job_data = json.loads(payload)
+            job_id = job["id"]
+            queue_name = job["queue_name"]
+            payload = json.loads(job["payload"]) if isinstance(job["payload"], str) else job["payload"]
 
-            if queue_name == Config.SEARCH_INDEX_QUEUE:
-                # Search indexing job
-                retry_count = job_data.get("_retries", 0)
-                try:
-                    process_search_index(job_data)
-                except Exception as e:
-                    print(f"Search index job failed: {e}")
-                    traceback.print_exc()
-                    if retry_count < Config.SEARCH_INDEX_MAX_RETRIES:
-                        job_data["_retries"] = retry_count + 1
-                        r.lpush(Config.SEARCH_INDEX_QUEUE, json.dumps(job_data))
-                        print(f"Retrying search index job (attempt {retry_count + 1}/{Config.SEARCH_INDEX_MAX_RETRIES})")
-                    else:
-                        r.lpush(Config.SEARCH_INDEX_DLQ, json.dumps(job_data))
-                        print(f"Search index job moved to DLQ after {Config.SEARCH_INDEX_MAX_RETRIES} failures")
-            elif queue_name == EmbeddingConfig.EMBEDDING_QUEUE:
-                # Embedding job
-                retry_count = job_data.get("_retries", 0)
-                try:
-                    process_embedding(job_data)
-                except Exception as e:
-                    print(f"Embedding job failed: {e}")
-                    traceback.print_exc()
-                    if retry_count < EmbeddingConfig.MAX_RETRIES:
-                        job_data["_retries"] = retry_count + 1
-                        r.lpush(EmbeddingConfig.EMBEDDING_QUEUE, json.dumps(job_data))
-                        print(f"Retrying embedding job (attempt {retry_count + 1}/{EmbeddingConfig.MAX_RETRIES})")
-                    else:
-                        r.lpush(EmbeddingConfig.EMBEDDING_DLQ, json.dumps(job_data))
-                        print(f"Embedding job moved to DLQ after {EmbeddingConfig.MAX_RETRIES} failures")
-            else:
-                # File processing job
-                retry_count = job_data.get("_retries", 0)
-                try:
-                    process_job(r, job_data)
-                except Exception as e:
-                    print(f"Job failed: {e}")
-                    traceback.print_exc()
+            try:
+                if queue_name == Config.SEARCH_INDEX_QUEUE:
+                    process_search_index(payload)
+                    ack_job(conn, job_id)
+                elif queue_name == EmbeddingConfig.EMBEDDING_QUEUE:
+                    process_embedding(payload)
+                    ack_job(conn, job_id)
+                else:
+                    process_job(conn, job)
+                    ack_job(conn, job_id)
 
-                    if retry_count < Config.MAX_RETRIES:
-                        delay = Config.RETRY_DELAYS[retry_count]
-                        job_data["_retries"] = retry_count + 1
-                        time.sleep(delay)
-                        r.lpush(Config.QUEUE_NAME, json.dumps(job_data))
-                        print(f"Retrying job (attempt {retry_count + 1}/{Config.MAX_RETRIES}) after {delay}s")
-                    else:
-                        r.lpush(Config.DEAD_LETTER_QUEUE, json.dumps(job_data))
-                        print(f"Job moved to dead letter queue after {Config.MAX_RETRIES} failures")
+            except Exception as e:
+                print(f"Job {job_id} failed: {e}")
+                traceback.print_exc()
+                if queue_name == Config.SEARCH_INDEX_QUEUE:
+                    fail_job(conn, job_id, str(e), Config.SEARCH_INDEX_MAX_RETRIES,
+                             Config.RETRY_DELAYS, Config.SEARCH_INDEX_DLQ)
+                elif queue_name == EmbeddingConfig.EMBEDDING_QUEUE:
+                    fail_job(conn, job_id, str(e), EmbeddingConfig.MAX_RETRIES,
+                             Config.RETRY_DELAYS, EmbeddingConfig.EMBEDDING_DLQ)
+                else:
+                    fail_job(conn, job_id, str(e), Config.MAX_RETRIES,
+                             Config.RETRY_DELAYS, Config.DEAD_LETTER_QUEUE)
 
-        except redis.ConnectionError:
-            print("Redis connection lost, reconnecting in 5s...")
+        except psycopg2.OperationalError as e:
+            print(f"PostgreSQL connection lost, reconnecting in 5s: {e}")
             time.sleep(5)
-            r = get_redis_client()
+            try:
+                conn = get_pg_conn()
+            except Exception as ex:
+                print(f"Reconnect failed: {ex}")
         except Exception as e:
             print(f"Unexpected error: {e}")
             traceback.print_exc()

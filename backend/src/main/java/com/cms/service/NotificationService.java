@@ -8,11 +8,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -22,10 +20,8 @@ import java.util.UUID;
 public class NotificationService {
 
     private static final String UNREAD_COUNT_KEY_PREFIX = "notifications:unread:";
-    private static final Duration CACHE_TTL = Duration.ofMinutes(5);
 
     private final NotificationRepository notificationRepository;
-    private final StringRedisTemplate redisTemplate;
 
     @Transactional
     public Notification createNotification(User recipient, Notification.Type type, String title,
@@ -69,23 +65,7 @@ public class NotificationService {
 
     @Transactional(readOnly = true)
     public long getUnreadCount(Long recipientId) {
-        String key = UNREAD_COUNT_KEY_PREFIX + recipientId;
-        try {
-            String cached = redisTemplate.opsForValue().get(key);
-            if (cached != null) {
-                return Long.parseLong(cached);
-            }
-        } catch (Exception e) {
-            log.warn("Redis unavailable for notification count cache (user {}): {}", recipientId, e.getMessage());
-        }
-
-        long count = notificationRepository.countByRecipientIdAndIsRead(recipientId, false);
-        try {
-            redisTemplate.opsForValue().set(key, String.valueOf(count), CACHE_TTL);
-        } catch (Exception e) {
-            log.warn("Failed to cache notification count for user {}: {}", recipientId, e.getMessage());
-        }
-        return count;
+        return notificationRepository.countByRecipientIdAndIsRead(recipientId, false);
     }
 
     @Transactional
@@ -116,10 +96,6 @@ public class NotificationService {
     }
 
     private void invalidateUnreadCountCache(Long recipientId) {
-        try {
-            redisTemplate.delete(UNREAD_COUNT_KEY_PREFIX + recipientId);
-        } catch (Exception e) {
-            log.warn("Failed to invalidate notification cache for user {}: {}", recipientId, e.getMessage());
-        }
+        // No-op: caching removed, counts queried directly from DB
     }
 }

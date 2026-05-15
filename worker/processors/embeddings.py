@@ -5,7 +5,6 @@ import io
 import uuid
 from datetime import datetime, timezone
 
-import boto3
 import pymysql
 import tiktoken
 from sentence_transformers import SentenceTransformer
@@ -21,6 +20,7 @@ from qdrant_client.models import (
 
 from config import Config
 from processors.embedding_config import EmbeddingConfig
+from processors.storage import get_object
 
 # Lazy-loaded globals
 _model = None
@@ -78,16 +78,6 @@ def get_db_connection():
         password=Config.MYSQL_PASSWORD,
         database=Config.MYSQL_DATABASE,
         cursorclass=pymysql.cursors.DictCursor,
-    )
-
-
-def get_s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=Config.MINIO_ENDPOINT,
-        aws_access_key_id=Config.MINIO_ACCESS_KEY,
-        aws_secret_access_key=Config.MINIO_SECRET_KEY,
-        region_name=Config.MINIO_REGION,
     )
 
 
@@ -158,10 +148,9 @@ def chunk_text(text: str, page_number: int = 1) -> list[dict]:
     return chunks
 
 
-def extract_text_from_file(s3_client, bucket: str, key: str, mime_type: str) -> str:
-    """Download file from MinIO and extract text content."""
-    response = s3_client.get_object(Bucket=bucket, Key=key)
-    content = response["Body"].read()
+def extract_text_from_file(bucket: str, key: str, mime_type: str) -> str:
+    """Download file from PostgreSQL storage and extract text content."""
+    content = get_object(bucket, key)
 
     if mime_type == "text/plain":
         return content.decode("utf-8", errors="replace")
@@ -248,8 +237,7 @@ def process_embedding(job_data: dict):
             conn.commit()
 
         # Extract text
-        s3_client = get_s3_client()
-        text = extract_text_from_file(s3_client, storage_bucket, storage_key, mime_type)
+        text = extract_text_from_file(storage_bucket, storage_key, mime_type)
 
         if not text.strip():
             with conn.cursor() as cursor:

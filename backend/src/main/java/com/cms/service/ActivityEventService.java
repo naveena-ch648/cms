@@ -10,7 +10,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,7 +24,6 @@ public class ActivityEventService {
     private static final String DASHBOARD_SUMMARY_KEY_PREFIX = "dashboard:summary:";
 
     private final ActivityEventRepository activityEventRepository;
-    private final StringRedisTemplate redisTemplate;
 
     @Async
     @Transactional
@@ -45,12 +43,7 @@ public class ActivityEventService {
                     .metadata(metadata)
                     .build();
             activityEventRepository.save(event);
-            // Invalidate dashboard summary cache for the actor
-            try {
-                redisTemplate.delete(DASHBOARD_SUMMARY_KEY_PREFIX + actor.getId());
-            } catch (Exception ex) {
-                log.warn("Failed to invalidate dashboard cache for user {}", actor.getId());
-            }
+            // Dashboard cache invalidation removed (no Redis)
         } catch (Exception e) {
             log.error("Failed to record activity event: {} for target {}", actionType, targetId, e);
         }

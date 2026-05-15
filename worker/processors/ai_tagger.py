@@ -2,15 +2,14 @@
 
 import json
 
-import boto3
 from openai import OpenAI
 
 from config import Config
 from processors.ai_prompts import TAGGING_PROMPT, CLASSIFICATION_PROMPT
+from processors.storage import get_object
 
 
 _openai_client = None
-_s3_client = None
 
 
 def get_openai_client():
@@ -20,25 +19,10 @@ def get_openai_client():
     return _openai_client
 
 
-def get_s3_client():
-    global _s3_client
-    if _s3_client is None:
-        _s3_client = boto3.client(
-            "s3",
-            endpoint_url=Config.MINIO_ENDPOINT,
-            aws_access_key_id=Config.MINIO_ACCESS_KEY,
-            aws_secret_access_key=Config.MINIO_SECRET_KEY,
-            region_name=Config.MINIO_REGION,
-        )
-    return _s3_client
-
-
 def extract_text(storage_bucket, storage_key, mime_type, max_chars=15000):
-    """Extract text content from a file stored in MinIO."""
-    s3 = get_s3_client()
+    """Extract text content from a file stored in PostgreSQL storage."""
     try:
-        response = s3.get_object(Bucket=storage_bucket, Key=storage_key)
-        raw_bytes = response["Body"].read()
+        raw_bytes = get_object(storage_bucket, storage_key)
 
         if mime_type == "application/pdf":
             return _extract_pdf_text(raw_bytes, max_chars)
