@@ -60,6 +60,8 @@ class WorkflowServiceTest {
         actor.setLastName("User");
         actor.setStatus(User.UserStatus.ACTIVE);
         actor.setOrganization(org);
+
+        lenient().when(workflowTransitionRepository.save(any())).thenAnswer(i -> i.getArgument(0));
     }
 
     @Test

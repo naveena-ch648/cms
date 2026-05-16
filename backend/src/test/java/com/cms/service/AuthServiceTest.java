@@ -14,8 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.Map;
@@ -32,8 +31,7 @@ class AuthServiceTest {
     @Mock UserOrganizationRoleRepository userOrgRoleRepository;
     @Mock JwtProvider jwtProvider;
     @Mock PasswordEncoder passwordEncoder;
-    @Mock RedisTemplate<String, String> redisTemplate;
-    @Mock ValueOperations<String, String> valueOps;
+    @Mock JdbcTemplate pgJdbc;
     @Mock AuditService auditService;
     @Mock PolicyService policyService;
     @Mock OrganizationService organizationService;
@@ -62,13 +60,11 @@ class AuthServiceTest {
         user.setStatus(User.UserStatus.ACTIVE);
         user.setOrganization(org);
 
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        when(redisTemplate.hasKey(anyString())).thenReturn(false);
-        when(organizationService.getByIdInternal(1L)).thenReturn(org);
-        when(policyService.getEffectivePolicy(any())).thenReturn(Map.of());
-        when(policyService.getSessionTimeoutMinutes(any())).thenReturn(15);
-        when(policyService.getAccountLockoutMinutes(any())).thenReturn(15);
-        when(policyService.getMaxFailedLoginAttempts(any())).thenReturn(5);
+        lenient().when(organizationService.getByIdInternal(1L)).thenReturn(org);
+        lenient().when(policyService.getEffectivePolicy(any())).thenReturn(Map.of());
+        lenient().when(policyService.getSessionTimeoutMinutes(any())).thenReturn(15);
+        lenient().when(policyService.getAccountLockoutMinutes(any())).thenReturn(15);
+        lenient().when(policyService.getMaxFailedLoginAttempts(any())).thenReturn(5);
     }
 
     @Test
@@ -92,7 +88,6 @@ class AuthServiceTest {
     void login_withWrongPassword_throwsAuthenticationException() {
         when(userRepository.findByEmailAndOrganizationId("user@test.com", 1L)).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("wrong", "hashed")).thenReturn(false);
-        when(valueOps.increment(anyString())).thenReturn(1L);
 
         assertThatThrownBy(() -> authService.login("user@test.com", 1L, "wrong", "127.0.0.1"))
                 .isInstanceOf(AuthenticationException.class)
@@ -102,7 +97,6 @@ class AuthServiceTest {
     @Test
     void login_withUnknownUser_throwsAuthenticationException() {
         when(userRepository.findByEmailAndOrganizationId("unknown@test.com", 1L)).thenReturn(Optional.empty());
-        when(valueOps.increment(anyString())).thenReturn(1L);
 
         assertThatThrownBy(() -> authService.login("unknown@test.com", 1L, "any", "127.0.0.1"))
                 .isInstanceOf(AuthenticationException.class)
@@ -111,7 +105,7 @@ class AuthServiceTest {
 
     @Test
     void login_withLockedAccount_throwsAuthenticationException() {
-        when(redisTemplate.hasKey(contains("auth:lockout:"))).thenReturn(true);
+        when(pgJdbc.queryForObject(anyString(), eq(Integer.class), anyString())).thenReturn(1);
 
         assertThatThrownBy(() -> authService.login("user@test.com", 1L, "password", "127.0.0.1"))
                 .isInstanceOf(AuthenticationException.class)
@@ -135,7 +129,6 @@ class AuthServiceTest {
         when(passwordEncoder.matches("password", "hashed")).thenReturn(true);
         when(twoFactorService.isEnabled(10L)).thenReturn(true);
         when(twoFactorService.getMethod(10L)).thenReturn(Optional.of(com.cms.entity.UserTwoFactor.TwoFactorMethod.TOTP));
-        doNothing().when(valueOps).set(anyString(), anyString(), any());
 
         assertThatThrownBy(() -> authService.login("user@test.com", 1L, "password", "127.0.0.1"))
                 .isInstanceOf(TwoFactorRequiredException.class);
@@ -149,6 +142,6 @@ class AuthServiceTest {
 
         authService.logout("valid-token");
 
-        verify(valueOps).set(eq("jwt:blocklist:jti-abc"), eq("blocked"), any());
+        verify(pgJdbc).update(contains("BLOCKLIST"), anyString(), anyLong());
     }
 }

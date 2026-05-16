@@ -1,3 +1,5 @@
+package com.cms.service;
+
 import com.cms.entity.*;
 import com.cms.repository.AuditAlertInstanceRepository;
 import com.cms.repository.AuditAlertRuleRepository;

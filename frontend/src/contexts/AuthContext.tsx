@@ -10,6 +10,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshAuth: () => Promise<void>;
+  setAuthData: (accessToken: string, refreshToken: string, userData: AuthUser) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -55,6 +56,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
+  const setAuthData = useCallback((accessToken: string, refreshToken: string, userData: AuthUser) => {
+    localStorage.setItem('accessToken', accessToken);
+    localStorage.setItem('refreshToken', refreshToken);
+    setUser(userData);
+  }, []);
+
   const refreshAuth = useCallback(async () => {
     const token = localStorage.getItem('accessToken');
     if (!token) {
@@ -88,7 +95,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [refreshAuth]);
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, logout, refreshAuth }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, logout, refreshAuth, setAuthData }}>
       {children}
     </AuthContext.Provider>
   );

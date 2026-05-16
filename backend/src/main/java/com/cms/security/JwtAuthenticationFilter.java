@@ -64,10 +64,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
+
+                if (userDetails instanceof UserPrincipal) {
+                    com.cms.middleware.TenantContext.setCurrentTenant(((UserPrincipal) userDetails).getOrganizationId());
+                }
             }
         }
 
-        filterChain.doFilter(request, response);
+        try {
+            filterChain.doFilter(request, response);
+        } finally {
+            com.cms.middleware.TenantContext.clear();
+        }
     }
 
     private String extractToken(HttpServletRequest request) {

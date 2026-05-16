@@ -30,12 +30,31 @@ public class IntegrationController {
     }
 
     @GetMapping("/google-drive/callback")
-    public ResponseEntity<ApiResponse<ConnectionResponse>> handleCallback(
-            @RequestParam String code,
+    public void handleCallback(
+            @RequestParam(required = false) String code,
             @RequestParam String state,
-            @AuthenticationPrincipal UserPrincipal user) {
-        ConnectionResponse response = integrationService.handleOAuthCallback(code, state, user);
-        return ResponseEntity.ok(ApiResponse.ok(response));
+            @RequestParam(required = false) String error,
+            jakarta.servlet.http.HttpServletResponse response) throws java.io.IOException {
+        
+        String frontendUrl = "http://localhost:3000/integrations";
+        
+        if (error != null) {
+            log.error("Google OAuth error: {}", error);
+            response.sendRedirect(frontendUrl + "?integration_error=" + java.net.URLEncoder.encode(error, java.nio.charset.StandardCharsets.UTF_8));
+            return;
+        }
+        if (code == null) {
+            response.sendRedirect(frontendUrl + "?integration_error=missing_code");
+            return;
+        }
+
+        try {
+            integrationService.handleOAuthCallback(code, state);
+            response.sendRedirect(frontendUrl + "?integration_success=true");
+        } catch (Exception e) {
+            log.error("Integration failed", e);
+            response.sendRedirect(frontendUrl + "?integration_error=failed");
+        }
     }
 
     @GetMapping("/connections")

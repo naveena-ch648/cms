@@ -14,6 +14,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.http.*;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
+import com.fasterxml.jackson.databind.JsonNode;
+
 import java.time.Instant;
 import java.util.*;
 
@@ -78,7 +85,7 @@ public class IntegrationService {
     }
 
     @Transactional
-    public ConnectionResponse handleOAuthCallback(String code, String state, UserPrincipal user) {
+    public ConnectionResponse handleOAuthCallback(String code, String state) {
         // Validate state parameter
         String stateKey = OAUTH_STATE_PREFIX + state;
         String stateValue = null;
@@ -92,17 +99,24 @@ public class IntegrationService {
         }
         pgJdbc.update("DELETE FROM jwt_tokens WHERE jti=?", stateKey);
 
+        String[] parts = stateValue.split(":");
+        Long stateUserId = Long.parseLong(parts[0]);
+        Long stateOrgId = 1L; // Fallback default
+        if (parts.length > 1 && !"null".equals(parts[1])) {
+            try {
+                stateOrgId = Long.parseLong(parts[1]);
+            } catch (NumberFormatException ignored) {}
+        }
+
         // Exchange code for tokens (simulated — in production would call Google Token endpoint)
         Map<String, String> tokens = exchangeCodeForTokens(code);
         String accessToken = tokens.get("access_token");
         String refreshToken = tokens.get("refresh_token");
         String email = tokens.getOrDefault("email", "connected@google.com");
 
-        Long orgId = TenantContext.getCurrentTenant();
-
         // Check for existing connection
         Optional<IntegrationConnection> existing = connectionRepository
-                .findByOrganizationIdAndUserIdAndProvider(orgId, user.getId(), "GOOGLE_DRIVE");
+                .findByOrganizationIdAndUserIdAndProvider(stateOrgId, stateUserId, "GOOGLE_DRIVE");
         if (existing.isPresent() && existing.get().getStatus() == IntegrationConnection.Status.ACTIVE) {
             throw new IllegalStateException("Google Drive connection already exists");
         }
@@ -118,9 +132,9 @@ public class IntegrationService {
             connection.setProviderAccountId(email);
         } else {
             Organization org = new Organization();
-            org.setId(orgId);
+            org.setId(stateOrgId);
             User userEntity = new User();
-            userEntity.setId(user.getId());
+            userEntity.setId(stateUserId);
 
             connection = IntegrationConnection.builder()
                     .uuid(UUID.randomUUID().toString())
@@ -310,47 +324,105 @@ public class IntegrationService {
     }
 
     private Map<String, String> exchangeCodeForTokens(String code) {
-        // In production, this would make an HTTP call to Google's token endpoint
-        // For now, return simulated tokens for development
-        Map<String, String> tokens = new HashMap<>();
-        tokens.put("access_token", "simulated_access_token_" + UUID.randomUUID());
-        tokens.put("refresh_token", "simulated_refresh_token_" + UUID.randomUUID());
-        tokens.put("email", "user@gmail.com");
-        return tokens;
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+        MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
+        body.add("code", code);
+        body.add("client_id", googleClientId);
+        body.add("client_secret", googleClientSecret);
+        body.add("redirect_uri", googleRedirectUri);
+        body.add("grant_type", "authorization_code");
+
+        try {
+            ResponseEntity<String> response = restTemplate.postForEntity(
+                    GOOGLE_TOKEN_URL, new HttpEntity<>(body, headers), String.class);
+            JsonNode json = objectMapper.readTree(response.getBody());
+            
+            Map<String, String> tokens = new HashMap<>();
+            tokens.put("access_token", json.path("access_token").asText());
+            if (json.has("refresh_token")) {
+                tokens.put("refresh_token", json.path("refresh_token").asText());
+            } else {
+                tokens.put("refresh_token", "");
+            }
+            
+            // Fetch email from Google UserInfo
+            HttpHeaders authHeaders = new HttpHeaders();
+            authHeaders.setBearerAuth(tokens.get("access_token"));
+            ResponseEntity<String> userInfo = restTemplate.exchange(
+                    "https://www.googleapis.com/oauth2/v3/userinfo", 
+                    HttpMethod.GET, new HttpEntity<>(authHeaders), String.class);
+            JsonNode infoJson = objectMapper.readTree(userInfo.getBody());
+            tokens.put("email", infoJson.path("email").asText("connected@google.com"));
+            
+            return tokens;
+        } catch (Exception e) {
+            log.error("Failed to exchange code for tokens", e);
+            throw new RuntimeException("Failed to exchange OAuth code for tokens", e);
+        }
     }
 
     private DriveBrowseResponse fetchDriveFiles(IntegrationConnection connection, String folderId, String query, String pageToken) {
-        // In production, this would call Google Drive API v3
-        // For development, return simulated results
-        List<DriveItemResponse> items = new ArrayList<>();
-        items.add(DriveItemResponse.builder()
-                .id("folder_" + UUID.randomUUID().toString().substring(0, 8))
-                .name("Documents")
-                .mimeType("application/vnd.google-apps.folder")
-                .size(0L)
-                .modifiedTime(Instant.now().toString())
-                .isFolder(true)
-                .build());
-        items.add(DriveItemResponse.builder()
-                .id("file_" + UUID.randomUUID().toString().substring(0, 8))
-                .name("Report.pdf")
-                .mimeType("application/pdf")
-                .size(1048576L)
-                .modifiedTime(Instant.now().toString())
-                .isFolder(false)
-                .build());
-        items.add(DriveItemResponse.builder()
-                .id("file_" + UUID.randomUUID().toString().substring(0, 8))
-                .name("Presentation.pptx")
-                .mimeType("application/vnd.openxmlformats-officedocument.presentationml.presentation")
-                .size(2097152L)
-                .modifiedTime(Instant.now().toString())
-                .isFolder(false)
-                .build());
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        try {
+            String accessToken = tokenEncryptor.decrypt(connection.getAccessTokenEncrypted());
+            headers.setBearerAuth(accessToken);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to decrypt access token", e);
+        }
 
-        return DriveBrowseResponse.builder()
-                .items(items)
-                .nextPageToken(null)
-                .build();
+        String q = "trashed = false";
+        if (folderId != null && !folderId.trim().isEmpty() && !folderId.equals("root")) {
+            q += " and '" + folderId + "' in parents";
+        } else {
+            q += " and 'root' in parents";
+        }
+        if (query != null && !query.trim().isEmpty()) {
+            q += " and name contains '" + query.replace("'", "\\'") + "'";
+        }
+
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl("https://www.googleapis.com/drive/v3/files")
+                .queryParam("q", q)
+                .queryParam("fields", "nextPageToken, files(id, name, mimeType, size, modifiedTime, parents)")
+                .queryParam("pageSize", "50")
+                .queryParam("orderBy", "folder, name");
+
+        if (pageToken != null && !pageToken.trim().isEmpty()) {
+            builder.queryParam("pageToken", pageToken);
+        }
+
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(
+                    builder.toUriString(), HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            JsonNode json = objectMapper.readTree(response.getBody());
+            
+            List<DriveItemResponse> items = new ArrayList<>();
+            if (json.has("files")) {
+                for (JsonNode file : json.get("files")) {
+                    String mimeType = file.path("mimeType").asText("");
+                    boolean isFolder = "application/vnd.google-apps.folder".equals(mimeType);
+                    
+                    items.add(DriveItemResponse.builder()
+                            .id(file.path("id").asText())
+                            .name(file.path("name").asText())
+                            .mimeType(mimeType)
+                            .size(file.path("size").asLong(0L))
+                            .modifiedTime(file.path("modifiedTime").asText(Instant.now().toString()))
+                            .isFolder(isFolder)
+                            .build());
+                }
+            }
+            
+            return DriveBrowseResponse.builder()
+                    .items(items)
+                    .nextPageToken(json.path("nextPageToken").asText(null))
+                    .build();
+        } catch (Exception e) {
+            log.error("Failed to fetch Google Drive files", e);
+            throw new RuntimeException("Failed to fetch Google Drive files", e);
+        }
     }
 }

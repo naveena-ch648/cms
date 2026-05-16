@@ -49,3 +49,4 @@ docker/redis-data/
 
 # Redis
 dump.rdb
+client_secret_*.json

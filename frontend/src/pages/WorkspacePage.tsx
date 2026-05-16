@@ -14,7 +14,6 @@ import CollaborationSidebar from "../components/collaboration/CollaborationSideb
 import MetadataFieldManager from "../components/metadata/MetadataFieldManager";
 import MetadataFilter from "../components/metadata/MetadataFilter";
 import BulkMetadataDialog from "../components/metadata/BulkMetadataDialog";
-import ShareLinkDialog from "../components/ShareLinkDialog";
 import InternalShareDialog from "../components/InternalShareDialog";
 import { useAuth } from "../contexts/AuthContext";
 import type {

@@ -34,6 +34,10 @@ public class User {
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 
+    /** Set when the user authenticated via Google OAuth. */
+    @Column(name = "google_id", unique = true)
+    private String googleId;
+
     @Column(name = "first_name", nullable = false, length = 100)
     private String firstName;
 

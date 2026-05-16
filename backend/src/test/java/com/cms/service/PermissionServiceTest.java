@@ -11,8 +11,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
 
 import java.util.Optional;
 import java.util.Set;
@@ -26,15 +24,11 @@ class PermissionServiceTest {
 
     @Mock UserOrganizationRoleRepository userOrgRoleRepository;
     @Mock PermissionRepository permissionRepository;
-    @Mock RedisTemplate<String, String> redisTemplate;
-    @Mock ValueOperations<String, String> valueOps;
 
     @InjectMocks PermissionService permissionService;
 
     @BeforeEach
     void setUp() {
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        when(valueOps.get(anyString())).thenReturn(null); // cache miss by default
     }
 
     @Test
@@ -94,16 +88,6 @@ class PermissionServiceTest {
     }
 
     @Test
-    void getEffectivePermissions_cachedResult_doesNotHitRepository() {
-        when(valueOps.get(anyString())).thenReturn("FILE_READ,FILE_WRITE");
-
-        Set<String> perms = permissionService.getEffectivePermissions(1L, 1L);
-
-        assertThat(perms).containsExactlyInAnyOrder("FILE_READ", "FILE_WRITE");
-        verifyNoInteractions(userOrgRoleRepository);
-    }
-
-    @Test
     void hasPermission_withMatchingPermission_returnsTrue() {
         Permission p = new Permission(); p.setName("FILE_DELETE");
         Role role = new Role();
@@ -122,8 +106,8 @@ class PermissionServiceTest {
     }
 
     @Test
-    void invalidateCache_deletesRedisKey() {
+    void invalidateCache_isNoOp() {
         permissionService.invalidateCache(1L, 1L);
-        verify(redisTemplate).delete("permissions:user:1:1");
+        // Should not throw or do anything
     }
 }

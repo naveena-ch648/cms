@@ -15,6 +15,7 @@ import AdminPage from "./pages/AdminPage";
 import AdminRoute from "./components/admin/AdminRoute";
 import IntegrationsPage from "./pages/IntegrationsPage";
 import SharedFilesPage from "./pages/SharedFilesPage";
+import OAuthCallbackPage from "./pages/OAuthCallbackPage";
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route path="/" element={<DashboardPage />} />
